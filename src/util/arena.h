@@ -35,6 +35,7 @@ private:
 
     std::vector<char*> blocks_;
 
+    // Total memory usage of the arena
     std::atomic<size_t> memory_usage_;
 };
 
