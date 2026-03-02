@@ -91,6 +91,18 @@ const char* GetVarint32PtrFallback(const char* p, const char* limit, uint32_t* v
     return nullptr;;
 }
 
+bool GetVarint32(Slice* input, uint32_t* value) {
+    const char* p = input->data();
+    const char* limit = p + input->size();
+    const char* q = GetVarint32Ptr(p, limit, value);
+    if (q == nullptr) {
+        return false;
+    } else {
+        *input = Slice(q, limit - q);
+        return true;
+    }
+}
+
 const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
     uint64_t result = 0;
     for (uint32_t shift = 0; shift <= 63 && p < limit; shift += 7) {
@@ -105,6 +117,29 @@ const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
         }
     }
     return nullptr;
+}
+
+bool GetVarint64(Slice* input, uint64_t* value) {
+    const char* p = input->data();
+    const char* limit = p + input->size();
+    const char* q = GetVarint64Ptr(p, limit, value);
+    if (q == nullptr) {
+        return false;
+    } else {
+        *input = Slice(q, limit - q);
+        return true;
+    }
+}
+
+bool GetLengthPrefixedSlice(Slice* input, Slice* result) {
+    uint32_t len;
+    if (GetVarint32(input, &len) && input->size() >= len) {
+        *result = Slice(input->data(), len);
+        input->remove_prefix(len);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 }

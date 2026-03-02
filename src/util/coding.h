@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string>
 
+#include "../../include/slice.h"
+
 namespace rocketdb {
 
 void PutFixed32(std::string* dst, uint32_t value);
@@ -11,11 +13,17 @@ void PutFixed64(std::string* dst, uint64_t value);
 void PutVarint32(std::string* dst, uint32_t value);
 void PutVarint64(std::string* dst, uint64_t value);
 
+bool GetVarint32(Slice* input, uint32_t* value);
+bool GetVarint64(Slice* input, uint64_t* value);
+bool GetLengthPrefixedSlice(Slice* input, Slice* result);
+
 const char* GetVarint32Ptr(const char* p, const char* limit, uint32_t* v);
 const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* v);
 
 int VartintLength(uint64_t v);
 
+// Variable-length encode stores data in seven-bit increments
+// with the eighth bit indicating whether there is more data
 char* EncodeVarint32(char* dst, uint32_t value);
 char* EncodeVarint64(char* dst, uint64_t value);
 
