@@ -11,81 +11,80 @@ namespace rocketdb {
 
 template <typename Key, class Comparator>
 class SkipList {
+    private:
+        struct Node;
 
-private:
-    struct Node;
+    public:
+        explicit SkipList(Comparator cmp, Arena* arena);
 
-public:
-    explicit SkipList(Comparator cmp, Arena* arena);
+        SkipList(const SkipList&) = delete;
+        SkipList& operator=(const SkipList&) = delete;
 
-    SkipList(const SkipList&) = delete;
-    SkipList& operator=(const SkipList&) = delete;
+        void Insert(const Key& key);
 
-    void Insert(const Key& key);
+        bool Contains(const Key& key) const;
 
-    bool Contains(const Key& key) const;
+        class Iterator {
+            
+        public: 
+            explicit Iterator(const SkipList* list);
 
-    class Iterator {
-        
-    public: 
-        explicit Iterator(const SkipList* list);
+            // Check if the iterator is in a valid location
+            bool Valid() const;
 
-        // Check if the iterator is in a valid location
-        bool Valid() const;
+            // Return the key at the current position
+            const Key& key() const;
 
-        // Return the key at the current position
-        const Key& key() const;
+            // Advances to the next position
+            void Next();
 
-        // Advances to the next position
-        void Next();
+            // Advances to the previous
+            void Prev();
 
-        // Advances to the previous
-        void Prev();
+            // Advances to the first entry with a key >= target
+            void Seek(const Key& target);
 
-        // Advances to the first entry with a key >= target
-        void Seek(const Key& target);
+            // Position at the first entry in list
+            void SeekToFirst();
 
-        // Position at the first entry in list
-        void SeekToFirst();
+            // Position at the last entry in list
+            void SeekToLast();
 
-        // Position at the last entry in list
-        void SeekToLast();
+        private:
+            const SkipList* list_;
+            Node* node_;
+        };
 
     private:
-        const SkipList* list_;
-        Node* node_;
-    };
+        enum { kMaxHeight = 12 };
 
-private:
-    enum { kMaxHeight = 12 };
+        inline int GetMaxHeight() const {
+            return max_height_.load(std::memory_order_relaxed);
+        }
 
-    inline int GetMaxHeight() const {
-        return max_height_.load(std::memory_order_relaxed);
-    }
+        Node* NewNode(const Key& key, int height);
+        int RandomHeight();
+        bool Equal(const Key& a, const Key& b) const { return (compare_(a, b) == 0); }
 
-    Node* NewNode(const Key& key, int height);
-    int RandomHeight();
-    bool Equal(const Key& a, const Key& b) const { return (compare_(a, b) == 0); }
+        // Compare
+        bool KeyIsAfterNode(const Key& key, Node* n) const;
 
-    // Compare
-    bool KeyIsAfterNode(const Key& key, Node* n) const;
+        // Find the first greater than or equal to, for Insert
+        Node* FindGreaterOrEqual(const Key& key, Node** prev) const;
 
-    // Find the first greater than or equal to, for Insert
-    Node* FindGreaterOrEqual(const Key& key, Node** prev) const;
+        // Find the largest less than, for Prev
+        Node* FindLessThan(const Key& key) const;
 
-    // Find the largest less than, for Prev
-    Node* FindLessThan(const Key& key) const;
+        Node* FindLast() const;
 
-    Node* FindLast() const;
+        Comparator const compare_;
+        Arena* const arena_;
+        
+        Node* const head_;
 
-    Comparator const compare_;
-    Arena* const arena_;
-    
-    Node* const head_;
+        std::atomic<int> max_height_;
 
-    std::atomic<int> max_height_;
-
-    Random rnd_;
+        Random rnd_;
 };
 
 template <typename Key, class Comparator>
@@ -115,9 +114,9 @@ struct SkipList<Key, Comparator>::Node {
         next_[n].store(x, std::memory_order_relaxed);
     }
 
-private:
-    // A flexible array, stores opinters from each level to the next node
-    std::atomic<Node*> next_[1];
+    private:
+        // A flexible array, stores opinters from each level to the next node
+        std::atomic<Node*> next_[1];
 };
 
 template <typename Key, class Comparator> 

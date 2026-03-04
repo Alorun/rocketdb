@@ -9,34 +9,33 @@
 namespace rocketdb {
 
 class Arena {
+    public:
+        Arena();
 
-public:
-    Arena();
+        Arena(const Arena&) = delete;
+        Arena& operator=(const Arena&) = delete;
 
-    Arena(const Arena&) = delete;
-    Arena& operator=(const Arena&) = delete;
+        ~Arena();
 
-    ~Arena();
+        char* Allocate(size_t bytes);
 
-    char* Allocate(size_t bytes);
+        char* AllocateAligned(size_t bytes);
+        
+        size_t MemoryUsage() const {
+            return memory_usage_.load(std::memory_order_relaxed);
+        }
 
-    char* AllocateAligned(size_t bytes);
-    
-    size_t MemoryUsage() const {
-        return memory_usage_.load(std::memory_order_relaxed);
-    }
+    private:
+        char* AllocateFallback(size_t bytes);
+        char* AllocateNewBlock(size_t block_bytes);
 
-private:
-    char* AllocateFallback(size_t bytes);
-    char* AllocateNewBlock(size_t block_bytes);
+        char* alloc_ptr_;
+        size_t alloc_bytes_remaining_;
 
-    char* alloc_ptr_;
-    size_t alloc_bytes_remaining_;
+        std::vector<char*> blocks_;
 
-    std::vector<char*> blocks_;
-
-    // Total memory usage of the arena
-    std::atomic<size_t> memory_usage_;
+        // Total memory usage of the arena
+        std::atomic<size_t> memory_usage_;
 };
 
 inline char* Arena::Allocate(size_t bytes) {
