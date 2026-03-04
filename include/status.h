@@ -20,6 +20,8 @@ public:
     Status(Status&& rhs) noexcept : state_(rhs.state_) { rhs.state_ = nullptr; }
     Status& operator=(Status&& rhs) noexcept;
 
+
+    // Static functions reduce repeated constructions
     static Status OK() { return Status(); }
     
     static Status NotFound(const Slice& msg1, const Slice& msg2 = Slice()) {
