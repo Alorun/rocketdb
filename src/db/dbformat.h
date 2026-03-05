@@ -56,8 +56,7 @@ inline size_t InternalKeyEncodingLength(const ParsedInternalKey& key) {
 
 void AppendInternalKey(std::string* result, const ParsedInternalKey& key);
 
-bool ParsedInternalKey(const Slice& internal_key, ParsedInternalKey* result);
-
+bool ParseInternalKey(const Slice& internal_key, ParsedInternalKey* result);
 
 inline Slice ExtractUserKey(const Slice& internal_key) {
     assert(internal_key.size() >= 8);
@@ -105,15 +104,66 @@ class InternalKey {
             return !rep_.empty();
         }
 
+        Slice Encode() const {
+            assert(!rep_.empty());
+            return rep_;
+        }
+
         Slice user_key() const { return ExtractUserKey(rep_); }
 
         void SetFrom(const ParsedInternalKey& p) {
             rep_.clear();
-            AppendInternalKey(rep_, p);
+            AppendInternalKey(&rep_, p);
         }
+
+        void Clear() { rep_.clear(); }
+
+        std::string DebugString() const;
 
     private:
         std::string rep_;
 };
+
+inline int InternalKeyComparator::Compare(const InternalKey& a, const InternalKey& b) const {
+    return Compare(a.Encode(), b.Encode());
+}
+
+inline bool ParsedInternalKey(const Slice& internal_key, ParsedInternalKey* result) {
+    const size_t n = internal_key.size();
+    if (n < 8) return false;
+    uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
+    uint8_t c = num & 0xff;
+    result->sequence = num >> 8;
+    result->type = static_cast<ValueType>(c);
+    result->user_key = Slice(internal_key.data(), n - 8);
+    return (c <= static_cast<uint8_t>(kTypeValue));
+}
+
+class LookupKey {
+    public:
+        LookupKey(const Slice& user_key, SequenceNumber sequence);
+
+        LookupKey(const LookupKey&) = delete;
+        LookupKey& operator=(const LookupKey&) = delete;
+
+        ~LookupKey();
+
+        Slice memtable_key() const { return Slice(start_, end_ - start_); }
+
+        Slice internal_key() const { return Slice(kstart_, end_ - start_); }
+
+        Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
+
+    private:
+        const char* start_;
+        const char* kstart_;
+        const char* end_;
+        char space_[200];
+};
+
+inline LookupKey::~LookupKey() {
+    if (start_ != space_) delete [] start_;
+}
+
 
 }
