@@ -8,6 +8,7 @@
 
 namespace rocketdb {
 
+// Append a fixed size to the byte stream according to little-endian order
 void PutFixed32(std::string* dst, uint32_t value);
 void PutFixed64(std::string* dst, uint64_t value);
 void PutVarint32(std::string* dst, uint32_t value);
