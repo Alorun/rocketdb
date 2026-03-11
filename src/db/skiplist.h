@@ -99,7 +99,7 @@ struct SkipList<Key, Comparator>::Node {
         return next_[n].load(std::memory_order_acquire);
     }
 
-    //Safe
+    // Safe
     void SetNext(int n, Node* x) {
         assert(n >= 0);
         next_[n].store(x, std::memory_order_release);

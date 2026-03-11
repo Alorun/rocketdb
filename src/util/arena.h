@@ -26,7 +26,10 @@ class Arena {
         }
 
     private:
+        // Two methods for allocating objects when memory block space exhausted
         char* AllocateFallback(size_t bytes);
+
+        // Actual memory allocation
         char* AllocateNewBlock(size_t block_bytes);
 
         char* alloc_ptr_;
@@ -38,6 +41,7 @@ class Arena {
         std::atomic<size_t> memory_usage_;
 };
 
+// Allcate memory of a specified size int bytes
 inline char* Arena::Allocate(size_t bytes) {
     assert(bytes > 0);
     if (bytes <= alloc_bytes_remaining_) {

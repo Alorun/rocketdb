@@ -16,7 +16,6 @@ Arena::~Arena() {
     }
 }
 
-// Two methods for allocating objects
 char* Arena::AllocateFallback(size_t bytes) {
     if (bytes > kBlockSize / 4) {
         char* result = AllocateNewBlock(bytes);
@@ -32,7 +31,7 @@ char* Arena::AllocateFallback(size_t bytes) {
     return result;
 }
 
-// Byte alignment
+// Byte alignments
 char* Arena::AllocateAligned(size_t bytes) {
     const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
     static_assert((align & (align - 1)) == 0, "Pointer size should be a power of 2");
@@ -53,7 +52,6 @@ char* Arena::AllocateAligned(size_t bytes) {
     return result;
 }
 
-// Actual memory allocation
 char* Arena::AllocateNewBlock(size_t block_bytes) {
     char* result = new char[block_bytes];
     blocks_.push_back(result);
