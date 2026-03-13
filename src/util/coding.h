@@ -11,6 +11,8 @@ namespace rocketdb {
 // Append a fixed size to the byte stream according to little-endian order
 void PutFixed32(std::string* dst, uint32_t value);
 void PutFixed64(std::string* dst, uint64_t value);
+
+// Append a var size to the byte stream according to little-endian order
 void PutVarint32(std::string* dst, uint32_t value);
 void PutVarint64(std::string* dst, uint64_t value);
 
@@ -64,6 +66,7 @@ inline uint32_t DecodeFixed32(const char* ptr) {
            (static_cast<uint32_t>(buffer[3]) << 24);
 }
 
+// Reassemble the eight bytes one by one
 inline uint64_t DecodeFixed64(const char* ptr) {
     const uint8_t* const buffer = reinterpret_cast<const uint8_t*>(ptr);
 
@@ -77,8 +80,10 @@ inline uint64_t DecodeFixed64(const char* ptr) {
            (static_cast<uint64_t>(buffer[7]) << 56);
 }
 
+// Read a var length integer (greater than one byte)
 const char* GetVarint32PtrFallback(const char* p, const char* limit, uint32_t* value);
 
+// Read a var length integer (Less than one byte)
 inline const char* GetVarint32Ptr(const char* p, const char* limit, uint32_t* value) {
     if (p < limit) {
         uint32_t result = *(reinterpret_cast<const uint8_t*>(p));

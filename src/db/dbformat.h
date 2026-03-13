@@ -171,9 +171,9 @@ class LookupKey {
         Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
 
     private:
-        // klength varint32    <-- start_
-        // userkey char[klength]    <-- kstart_
-        // tag uint64    <-- end_
+        // klength   varint32       <-- start_
+        // userkey   char[klength]  <-- kstart_
+        // tag       uint64         <-- end_
 
         const char* start_;
         const char* kstart_; 

@@ -88,7 +88,7 @@ const char* GetVarint32PtrFallback(const char* p, const char* limit, uint32_t* v
             return reinterpret_cast<const char*>(p);
         }
     }
-    return nullptr;;
+    return nullptr;
 }
 
 bool GetVarint32(Slice* input, uint32_t* value) {

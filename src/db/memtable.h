@@ -59,8 +59,8 @@ class MemTable {
 
         ~MemTable();
 
-        KeyComparator comparator;
-        int refs_;
+        KeyComparator comparator_;
+        int refs_;  // Current reference count
         Arena arena_;
         Table table_;
 };
