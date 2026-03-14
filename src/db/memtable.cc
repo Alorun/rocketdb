@@ -40,14 +40,14 @@ static const char* EncodeKey(std::string* scrach, const Slice& target) {
     return scrach->data();
 }
 
-class MeTableIterator : public Iterator {
+class MemTableIterator : public Iterator {
     public:
-        explicit MeTableIterator(MemTable::Table* table) : iter_(table) {}
+        explicit MemTableIterator(MemTable::Table* table) : iter_(table) {}
 
-        MeTableIterator(const MeTableIterator&) = delete;
-        MeTableIterator& operator=(const MeTableIterator&) = delete;
+        MemTableIterator(const MeTableIterator&) = delete;
+        MemTableIterator& operator=(const MeTableIterator&) = delete;
 
-        ~MeTableIterator() override = default;
+        ~MemTableIterator() override = default;
 
         bool Valid() const override { return iter_.Valid(); }
         void Seek(const Slice& k) override { iter_.Seek(EncodeKey(&tmp_, k)); }
@@ -69,7 +69,7 @@ class MeTableIterator : public Iterator {
 
 };
 
-Iterator* MemTable::NewIterator() { return new MemTableIterator(&table); }
+Iterator* MemTable::NewIterator() { return new MemTableIterator(&table_); }
 
 void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key, const Slice& value) {
     // Internal key length : varint32 byte

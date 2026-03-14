@@ -154,7 +154,7 @@ inline bool ParseInternalKey(const Slice& internal_key, ParsedInternalKey* resul
     return (c <= static_cast<uint8_t>(kTypeValue));
 }
 
-
+// Construct different internal query keys
 class LookupKey {
     public:
         LookupKey(const Slice& user_key, SequenceNumber sequence);
@@ -166,7 +166,7 @@ class LookupKey {
 
         Slice memtable_key() const { return Slice(start_, end_ - start_); }
 
-        Slice internal_key() const { return Slice(kstart_, end_ - start_); }
+        Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }
 
         Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
 

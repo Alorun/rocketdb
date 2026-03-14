@@ -8,6 +8,7 @@
 #include "../../include/slice.h"
 #include "../../include/status.h"
 #include "../../include/env.h"
+#include "../util/crc32c.h"
 
 namespace rocketdb {
 
@@ -51,18 +52,19 @@ class Reader {
         // Skip all blocks that are completely before "initial_offset_"
         bool SkipToInitialBlock();
 
+        // Read real data and examine for ReaderRecord
         unsigned int ReadPhysicalRecord(Slice* result);
 
         // Reports dropped bytes to the reporter
         void ReportCorruption(uint64_t bytes, const char* reason);
         void ReportDrop(uint64_t bytes, const Status& reason);
 
-        SequentialFile* const file_;
+        SequentialFile* const file_;   // Read data from file_ to backing_store
         Reporter* const reporter_;
         bool const checksum_;
-        char* const backing_store_;
-        Slice buffer_;
-        bool eof_;
+        char* const backing_store_;  // Raw storage
+        Slice buffer_;  // Store unparsed data in backing_store
+        bool eof_;  // Flag the file has been read
 
         // Offset of the last record returned by ReadRecord
         uint64_t last_record_offset_;
@@ -71,6 +73,7 @@ class Reader {
 
         uint64_t const initial_offset_;
 
+        // Used to skip incomplete records read
         bool resyncing_;
 };
 
