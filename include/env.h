@@ -44,4 +44,16 @@ class WritableFile {
         virtual Status Sync() = 0;
 };
 
+class RandomAccessFile {
+    public:
+        RandomAccessFile() = default;
+
+        RandomAccessFile(const RandomAccessFile&) = delete;
+        RandomAccessFile& operator=(const RandomAccessFile&) = delete;
+
+        virtual ~RandomAccessFile();
+
+        virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const = 0;
+};
+
 }

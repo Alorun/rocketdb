@@ -48,7 +48,7 @@ class Footer {
         const BlockHandle& metaindex_handle() const { return metaindex_handle_; }
         void set_metaindex_handle(const BlockHandle& h) { metaindex_handle_ = h; }
 
-        // The block handle for the mateindex block of the table
+        // The block handle for the index block of the table
         const BlockHandle& index_handle() const { return index_handle_; }
         void set_index_handle(const BlockHandle& h) { index_handle_ = h; }
 
@@ -60,10 +60,10 @@ class Footer {
         BlockHandle index_handle_;  // Index Block
 };
 
-// Verify if is a valid SSTable file
+// Verify if is a valid SSTable file, eight bytes
 static const uint64_t kTableMagicNumber = 0xdb4775248b08fb57ull;
 
-// 1-byte type + 32-bit crc
+// 1-byte type (snappy) + 32-bit crc
 static const size_t kBlockTrailerSize = 5;
 
 struct BlockContents {
@@ -77,6 +77,6 @@ struct BlockContents {
 // On failture return non-Ok
 Status ReadBlock(RandomAccessFile* file, const ReadOptions& options, const BlockHandle& handle, BlockContents* result);
 
-inline BlockHandle::BlockHandle() : offset_(static_cast<uint64_t>(0)), size_(static_cast<uint64_t>(0)) {}
+inline BlockHandle::BlockHandle() : offset_(~static_cast<uint64_t>(0)), size_(~static_cast<uint64_t>(0)) {}
 
 }
