@@ -8,17 +8,18 @@ namespace rocketdb {
 class Slice;
 class WritbaleFile;
 
-// Convert numbers to strings
 void AppendNumberTo(std::string* str, uint64_t num);
 
-// Convert byte stream to string 
-void AppendEscapedStringTo(std::string* str, const Slice& value);
-
+// Append human-readable numbers to strings    number --> string
 std::string NumberToString(uint64_t num);
 
-std::string EscapeString(const Slice& value);
-
-// Extract the digits from the slice
+// Extract human-readable numbers from the slice   string --> number 
 bool ConsumeDecimalNumber(Slice* in, uint64_t* val);
+
+// Return a human-readable version of value
+// Escapes any non-printbale characters found in value
+void AppendEscapedStringTo(std::string* str, const Slice& value);
+
+std::string EscapeString(const Slice& value);
 
 }
