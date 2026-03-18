@@ -1,7 +1,7 @@
 #pragma once
 
 #include "env.h"
-#include "filterpolicy.h"
+#include "filter_policy.h"
 #include <cstddef>
 
 namespace rocketdb {

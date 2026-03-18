@@ -6,7 +6,7 @@
 
 #include "../../include/slice.h"
 #include "../../include/status.h"
-#include "../../include/table_build.h"
+#include "../../include/table_builder.h"
 
 namespace rocketdb {
 

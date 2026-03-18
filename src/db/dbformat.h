@@ -8,7 +8,7 @@
 #include "../../include/comparator.h"
 #include "../../include/slice.h"
 #include "../util/coding.h"
-#include "../../include/filterpolicy.h"
+#include "../../include/filter_policy.h"
 
 namespace rocketdb {
 
