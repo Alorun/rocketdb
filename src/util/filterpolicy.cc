@@ -1,4 +1,4 @@
-#include "../../include/filterpolicy.h"
+#include "../../include/filter_policy.h"
 
 namespace rocketdb {
 

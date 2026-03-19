@@ -12,6 +12,18 @@ namespace rocketdb {
 
 class FilterPolicy;
 
+// Filter Format
+//      Filter[0] 
+//      Filter[1]
+//         ~ 
+//      Filter[n]
+//      Offset[0] 
+//      Offset[1] 
+//         ~ 
+//      Offset[n] (every offset is 4 bytes)
+//      Offset Array Point (point to offset[0] is 4 bytes)
+//      Base Lg (default is 11 also is 2KB)
+
 class FilterBlockBuilder {
     public:
         explicit FilterBlockBuilder(const FilterPolicy*);
@@ -22,6 +34,7 @@ class FilterBlockBuilder {
         // If block_offset >= 2kb, generate new filter
         void StartBlock(uint64_t block_offset);
         void AddKey(const Slice& key);
+        // Call the function when the file was finish
         Slice Finish();
 
     private:
@@ -37,15 +50,15 @@ class FilterBlockBuilder {
 
 class FilterBlockReader {
     public:
-        FilterBlockReader(const FilterBlockReader* policy, const Slice& contents);
+        FilterBlockReader(const FilterPolicy* policy, const Slice& contents);
         bool KeyMayMatch(uint64_t block_offset, const Slice& key);
 
     private:
         const FilterPolicy* policy_;
-        const char* data_;
-        const char* offset_;
-        size_t num_;
-        size_t base_lg_;
+        const char* data_;              // The Raw pointer
+        const char* offset_;            // The begin of offset array
+        size_t num_;                    // The number of filters
+        size_t base_lg_;                // The size fo handled by each filter
 };
 
 }

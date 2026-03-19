@@ -43,7 +43,6 @@ class TableBuilder {
         // REQUIRES: Finish(), Abandon() have not been called
         Status Finish();
 
-
         // Indicate that the contents of this builder should be abandoned
         // Stop using the file passed to the constructor after the function returns
         // REQUIRES: Finish(), Abandon() have not been called

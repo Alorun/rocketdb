@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <ratio>
 
 namespace rocketdb {
 
@@ -51,10 +52,48 @@ void FilterBlockBuilder::GenerateFilter() {
         return;
     }
 
-    start_.push_back(keys_.size());
+    start_.push_back(keys_.size());  // Simplify length computation
     tmp_keys_.resize(num_keys);
+    for (size_t i = 0; i < num_keys; i++) {
+        const char* base = keys_.data() + start_[i];
+        size_t length = start_[i + 1] - start_[i];
+        tmp_keys_[i] =Slice(base, length);
+    }
 
+    filter_offsets_.push_back(result_.size());
+    policy_->CreateFilter(&tmp_keys_[0], static_cast<int>(num_keys), &result_);
+
+    tmp_keys_.clear();
+    keys_.clear();
+    start_.clear();
 }
 
+FilterBlockReader::FilterBlockReader(const FilterPolicy* policy, const Slice& contents) 
+        : policy_(policy), data_(nullptr), offset_(nullptr), num_(0), base_lg_(0) {
+    size_t n = contents.size();
+    if (n < 5) return;
+    base_lg_ = contents[n - 1];
+    uint32_t last_word = DecodeFixed32(contents.data() + n - 5);
+    if (last_word > n - 5) return;
+    data_ = contents.data();
+    offset_ = data_ + last_word;
+    num_ = (n - 5 - last_word) / 4;
+}
+
+bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
+    // Division operation, can quickly determine which filter it belongs to
+    uint64_t index = block_offset >> base_lg_;  
+    if (index < num_) {
+        uint32_t start = DecodeFixed32(offset_ + index * 4);
+        uint32_t limit = DecodeFixed32(offset_ + index * 4 + 4);
+        if (start <= limit && limit <= static_cast<size_t>(offset_ - data_)) {
+            Slice filter = Slice(data_ + start, limit - start);
+            return policy_->KeyMayMatch(key, filter);
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
 
 }
