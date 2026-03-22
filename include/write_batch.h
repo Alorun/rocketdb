@@ -46,7 +46,7 @@ class WriteBatch {
 
     private:
         friend class WriteBatchInternal;
-
+        
         std::string rep_;
 };  
 

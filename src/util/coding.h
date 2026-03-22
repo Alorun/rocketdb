@@ -16,6 +16,8 @@ void PutFixed64(std::string* dst, uint64_t value);
 void PutVarint32(std::string* dst, uint32_t value);
 void PutVarint64(std::string* dst, uint64_t value);
 
+void PutLengthPrefixedSlice(std::string* dst, const Slice& value);
+
 bool GetVarint32(Slice* input, uint32_t* value);
 bool GetVarint64(Slice* input, uint64_t* value);
 bool GetLengthPrefixedSlice(Slice* input, Slice* result);

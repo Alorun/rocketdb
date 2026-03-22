@@ -66,6 +66,11 @@ void PutVarint64(std::string *dst, uint32_t value) {
     dst->append(buf, ptr - buf);
 }
 
+void PutLengthPrefixedSlice(std::string* dst, const Slice& value) {
+    PutVarint32(dst, value.size());
+    dst->append(value.data(), value.size());
+}
+
 int VartintLength(uint64_t v) {
     int len = 1;
     while (v >= 128) {
