@@ -42,6 +42,7 @@ namespace rocketdb {
             return Status(kIOError, msg1, msg2);
         }
 
+        // If true return 1, else return 0
         bool ok() const { return (state_ == nullptr); }
 
         bool IsNotFound() const { return code() == kNotFound; }
