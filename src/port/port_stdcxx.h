@@ -42,7 +42,7 @@ namespace port {
 class CondVar;
 
 // Thinly wraps std::mutex.
-class LOCKABLE Mutex {
+class Mutex {
  public:
   Mutex() = default;
   ~Mutex() = default;
