@@ -19,6 +19,7 @@ Cache::~Cache() {}
 
 namespace  {
 
+// An entry is a varible length heap-allocated structure
 struct LRUHandle {
     void* value;
     void (*deleter)(const Slice&, void* value);
@@ -27,10 +28,10 @@ struct LRUHandle {
     LRUHandle* prev;
     size_t charge;
     size_t key_length;
-    bool in_cache;
-    uint32_t refs;
-    uint32_t hash;  
-    char key_data[1];
+    bool in_cache;      // Whether entry is in the cache
+    uint32_t refs;      // References
+    uint32_t hash;      // Hash of key()
+    char key_data[1];   // Beginning of key
 
     Slice key() const {
         assert(next != this);

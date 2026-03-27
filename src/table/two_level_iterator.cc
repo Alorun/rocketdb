@@ -1,10 +1,11 @@
 #include "two_level_iterator.h"
 
+#include <cassert>
+
 #include "../../include/table.h"
 #include "format.h"
 #include "block.h"
 #include "iterator_wrapper.h"
-#include <cassert>
 
 namespace rocketdb {
 

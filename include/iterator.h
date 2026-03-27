@@ -22,6 +22,7 @@ class Iterator {
 
         virtual void SeekToLast() = 0;
 
+        // Find the first key >= the target
         virtual void Seek(const Slice& target) = 0;
 
         // Move to the next entry in the source
