@@ -14,7 +14,6 @@ class Cache;
 // The implementation of Cache use a least-recently-used eviction policy
 Cache* NewLRUCache(size_t capaeity);
 
-
 class Cache {
     public:
         Cache() = default;

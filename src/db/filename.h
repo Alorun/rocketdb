@@ -24,6 +24,7 @@ std::string LogFileName(const std::string& dbname, uint64_t number);
 
 std::string TableFileName(const std::string& dbname, uint64_t number);
 
+// To be compatible with the names of previous verisons
 std::string SSTTableFileName(const std::string& dbname, uint64_t number);
 
 std::string TempFileName(const std::string& dbname, uint64_t number);
