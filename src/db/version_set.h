@@ -87,7 +87,7 @@ class Version {
 
         Iterator* NewConcatenatingIterator(const ReadOptions&, int level) const;
 
-        void ForEachOverlapping(Slice user_key, Slice internal_key, void* arg, bool (*func)(void*, int, FileMetaData));
+        void ForEachOverlapping(Slice user_key, Slice internal_key, void* arg, bool (*func)(void*, int, FileMetaData*));
 
         VersionSet* vset_;      // Version Set
         Version* next_;         // Next Version
