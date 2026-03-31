@@ -217,6 +217,7 @@ enum SaverState {
     kDeleted,
     kCorrupt,
 };
+// Responsible for storing the read data
 struct Saver {
     SaverState state;
     const Comparator* ucmp;
@@ -247,7 +248,7 @@ static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
 void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg, bool (*func)(void*, int, FileMetaData*)) {
     const Comparator* ucmp = vset_->icmp_.user_comparator();
 
-    // Search 0 level
+    // Search 0 level in order from newest to oldest
     std::vector<FileMetaData*> tmp;
     tmp.reserve(files_[0].size());
     for (uint32_t i = 0; i < files_[0].size(); i++) {
@@ -257,6 +258,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg, 
         }
     }
     if (!tmp.empty()) {
+        // Make sure can read th latest data
         std::sort(tmp.begin(), tmp.end(), NewestFirst);
         for (uint32_t i = 0; i < tmp.size(); i++) {
             if (!(*func)(arg, 0, tmp[i])) {
@@ -290,19 +292,25 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k, std::string*
 
     struct State {
         Saver saver;
-        GetStats* stats;
+
+        // Input
         const ReadOptions* options;
         Slice ikey;
+        VersionSet* vset;
+
+        // Optimization
+        GetStats* stats;
         FileMetaData* last_file_read;
         int last_file_read_level;
 
-        VersionSet* vset;
+        // Output
         Status s;
         bool found;
 
         static bool Match(void* arg, int level, FileMetaData* f) {
             State* state = reinterpret_cast<State*>(arg);
 
+            // Last file is invild found, record in stats
             if (state->stats->seek_file == nullptr && state->last_file_read != nullptr) {
                 state->stats->seek_file = state->last_file_read;
                 state->stats->seek_file_level = state->last_file_read_level;
@@ -311,7 +319,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k, std::string*
             state->last_file_read = f;
             state->last_file_read_level = level;
 
-            state->s = state->vset->table_cache->Get(*state->options, f->number, f->file_size, state->ikey,
+            state->s = state->vset->table_cache_->Get(*state->options, f->number, f->file_size, state->ikey,
                                                       &state->saver, SaveValue);
             if (!state->s.ok()) {
                 state->found = true;
@@ -355,10 +363,12 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k, std::string*
     return state.found ? state.s : Status::NotFound(Slice());
 }
 
+// Optimize invalid file query
 bool Version::UpdateStats(const GetStats& stats) {
     FileMetaData* f = stats.seek_file;
     if (f != nullptr) {
         f->allowed_seeks--;
+        // File invalid queries exhausted, added to compression queue
         if (f->allowed_seeks <= 0 && file_to_compact_ == nullptr) {
             file_to_compact_ = f;
             file_to_compac_level = stats.seek_file_level;
@@ -402,7 +412,7 @@ bool Version::RecordReadSample(Slice internal_key) {
 void Version::Ref() { ++refs_; }
 
 void Version::Unref() {
-    assert(this != &vset_->dummy_sersions_);
+    assert(this != &vset_->dummy_versions_);
     assert(refs_ >= 1);
     --refs_;
     if (refs_ == 0) {
@@ -417,7 +427,9 @@ bool Version::OverlapInLevel(int level, const Slice* smallest_user_key, const Sl
 
 int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key, const Slice& largest_user_key) {
     int level = 0;
+    // If the data ovelaps with L0, it must be placed in L0 first for find the latest data
     if (!OverlapInLevel(0, &smallest_user_key, &largest_user_key)) {
+        // The seq to cover the maximum area
         InternalKey start(smallest_user_key, kMaxSequenceNumber, kValueTypeForSeek);
         InternalKey limit(largest_user_key, 0, static_cast<ValueType>(0));
         std::vector<FileMetaData*> overlaps;
@@ -426,6 +438,7 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key, const Sl
                 break;
             }
             if (level + 2 < config::kNumLevels) {
+                // Check that file dose not overlop too many grandparent bytes (write enlarged)
                 GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
                 const int64_t sum = TotalFileSize(overlaps);
                 if (sum > MaxGrandParentOverlapBytes(vset_->options_)) {
@@ -461,6 +474,8 @@ void Version::GetOverlappingInputs(int level, const InternalKey* begin, const In
         } else {
             inputs->push_back(f);
             if (level == 0) {
+                // Level-0 file may overlap each other, So check if the newly added files has expanded thr range
+                // If so, it is necessary to clear and recalculate
                 if (begin != nullptr && user_cmp->Compare(file_start, user_begin) < 0) {
                     user_begin = file_start;
                     inputs->clear();
@@ -501,5 +516,61 @@ std::string Version::DebugString() const {
     return r;
 }
 
+class VersionSet::Builder {
+    public:
+        Builder(VersionSet* vset, Version* base) : vset_(vset), base_(base) {
+            base_->Ref();
+            BySmallestKey cmp;
+            cmp.internal_comparator = &vset_->icmp_;
+            for (int level = 0; level < config::kNumLevels; level++) {
+                level_[level].added_files = new FileSet(cmp);
+            }
+        }
+
+        ~Builder() {
+            for (int level = 0; level < config::kNumLevels; level++) {
+                const FileSet* added = level_[level].added_files;
+                std::vector<FileMetaData*> to_unref;
+                to_unref.reserve(added->size());
+                for (FileSet::const_iterator it = added->begin(); it != added->end(); ++it) {
+                    to_unref.push_back(*it);
+                }
+                delete added;
+                for (uint32_t i = 0; i < to_unref.size(); i++) {
+                    FileMetaData* f = to_unref[i];
+                    f->refs--;
+                    if (f->refs <= 0) {
+                        delete f;
+                    }
+                }
+            }
+            base_->Unref();
+        }
+
+    private:
+        struct BySmallestKey {
+            const InternalKeyComparator* internal_comparator;
+
+            bool operator()(FileMetaData* f1, FileMetaData* f2) const {
+                int r = internal_comparator->Compare(f1->smallest, f2->smallest);
+                if (r != 0) {
+                    return (r < 0);
+                } else {
+                    return (f1->number < f2->number);
+                }
+            }
+        };
+
+        typedef std::set<FileMetaData*, BySmallestKey> FileSet;
+
+        struct LevelState {
+            std::set<uint64_t> deleted_files;
+            FileSet* added_files;
+        };
+
+        VersionSet* vset_;
+        Version* base_;
+        LevelState level_[config::kNumLevels];
+};
 
 }

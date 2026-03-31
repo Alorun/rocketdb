@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "../port/port.h"
 #include "../port/thread_annotations.h"
 #include "../../include/options.h"
+#include "table_cache.h"
 
 namespace rocketdb {
 
@@ -23,6 +25,7 @@ class TableBuilder;
 class Version;
 class VersionSet;
 class WritableFile;
+class Compaction;
 
 int FindFile(const InternalKeyComparator& icmp, const std::vector<FileMetaData*>& files, const Slice& key);
 
@@ -105,8 +108,58 @@ class Version {
         int compaction_level_;      // The highest priority level to be compaction
 };
 
+class VersionSet {
+    public:
+        VersionSet(const std::string& dbname, const Options* options, TableCache* table_cache, const InternalKeyComparator*);
 
+        VersionSet(const VersionSet&) = delete;
+        Version& operator=(const VersionSet&) = delete;
 
+        ~VersionSet();
+
+    private:
+        class Builder;
+
+        friend class Compaction;
+        friend class Version;
+
+        bool ReuseManifest(const std::string& dscname, const std::string& dscbase);
+
+        void Finalize(Version* v);
+
+        void GetRange(const std::vector<FileMetaData*>& inputs, InternalKey* smallest, InternalKey* largest);
+
+        void GetRange2(const std::vector<FileMetaData*>& inputs1, const std::vector<FileMetaData*>& input2,
+                       InternalKey* smallest, InternalKey* largest);
+
+        void SetupOtherInputs(Compaction* c);
+
+        Status WriteSnapshot(log::Writer* log);
+        void AppendVersion(Version* v);
+
+        Env* const env_;
+        const std::string dbname_;
+        const Options* const options_;
+        TableCache* const table_cache_;
+        const InternalKeyComparator icmp_;
+        uint64_t next_file_number;
+        uint64_t mainifest_file_number_;
+        uint64_t last_sequence_;
+        uint64_t log_number_;
+        uint64_t prev_log_number_;
+
+        WritableFile* descriptor_file_;
+        log::Writer* descriptor_log_;
+
+        Version dummy_versions_;
+        Version* current_;
+
+        std::string compact_pointer_[config::kNumLevels];
+};
+
+class Compaction {
+
+};
 
 
 }
