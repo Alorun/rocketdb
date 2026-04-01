@@ -72,6 +72,7 @@ class VersionEdit {
             deleted_files_.insert(std::make_pair(level, file));
         }
 
+        // Appemd and decode VersionEdit to MANIFEST files
         void EncodeTo(std::string* dst) const;
         Status DecodeFrom(const Slice& src);
 
@@ -93,6 +94,7 @@ class VersionEdit {
         bool has_next_file_number_;
         bool has_last_sequence_;
 
+        // Store thr boundary key of the previous compaction for each level
         std::vector<std::pair<int, InternalKey>> compact_pointers_;
         DeletedFileSet deleted_files_;
         std::vector<std::pair<int, FileMetaData>> new_files_;

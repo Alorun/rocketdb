@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "dbformat.h"
@@ -20,6 +21,9 @@
 #include "../../include/options.h"
 #include "version_edit.h"
 #include "table_cache.h"
+#include "filename.h"
+#include "../util/logging.h"
+
 
 namespace rocketdb {
 
@@ -547,7 +551,107 @@ class VersionSet::Builder {
             base_->Unref();
         }
 
+        // Apply all of the edits in *edit to the current state
+        void Apply(const VersionEdit* edit) {
+            // Update compaction pointers
+            for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
+                const int level = edit->compact_pointers_[i].first;
+                vset_->compact_pointer_[level] = edit->compact_pointers_[i].second.Encode().ToString();
+            }
+
+            // Delete files
+            for (const auto& deleted_file_set_kvp : edit->deleted_files_) {
+                const int level = deleted_file_set_kvp.first;
+                const uint64_t number = deleted_file_set_kvp.second;
+                level_[level].deleted_files.insert(number);
+            }
+
+            // Add new files
+            for (size_t i = 0; i < edit->new_files_.size(); i++) {
+                const int level = edit->new_files_[i].first;
+                FileMetaData* f = new FileMetaData(edit->new_files_[i].second);
+                f->refs = 1;
+
+                // The cost of invalid queries Vs th costs of file merging
+                // We arrange to automatically compact this file after
+                // a certain number of seeks.  Let's assume:
+                //   (1) One seek costs 10ms
+                //   (2) Writing or reading 1MB costs 10ms (100MB/s)
+                //   (3) A compaction of 1MB does 25MB of IO:
+                //         1MB read from this level
+                //         10-12MB read from next level (boundaries may be misaligned)
+                //         10-12MB written to next level
+                // This implies that 25 seeks cost the same as the compaction
+                // of 1MB of data.  I.e., one seek costs approximately the
+                // same as the compaction of 40KB of data.  We are a little
+                // conservative and allow approximately one seek for every 16KB
+                // of data before triggering a compaction.
+                f->allowed_seeks = static_cast<int>((f->file_size / 16384U));
+                if (f->allowed_seeks < 100) f->allowed_seeks = 100;
+
+                level_[level].deleted_files.erase(f->number);
+                level_[level].added_files->insert(f);
+            }
+        }
+
+        void SaveTo(Version* v) {
+            BySmallestKey cmp;
+            cmp.internal_comparator = &vset_->icmp_;
+            for (int level = 0; level < config::kNumLevels; level++) {
+                // Merge the set of added files with the set of pre_existing files
+                // Drop any deleted files. Store the result in *v
+                const std::vector<FileMetaData*>& base_files = base_->files_[level];
+                std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
+                std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
+                const FileSet* added_files = level_[level].added_files;
+                v->files_[level].reserve(base_files.size() + added_files->size());
+                for (const auto& added_file : *added_files) {
+                    for (std::vector<FileMetaData*>::const_iterator bpos = std::upper_bound(base_iter, base_end, added_file, cmp); 
+                        base_iter != bpos; ++base_iter) {
+                            MaybeAddFile(v, level, *base_iter);
+                        }
+                    MaybeAddFile(v, level, added_file);
+                }
+                for (; base_iter != base_end; ++base_iter) {
+                    MaybeAddFile(v, level, *base_iter);
+                }
+
+#ifndef NDEBUG                
+                // Make sure there is no overlap in levels > 0
+                if (level > 0) {
+                    for (uint32_t i = 1; i < v->files_[level].size(); i++) {
+                        const InternalKey& prev_end = v->files_[level][i - 1]->largest;
+                        const InternalKey& this_begin = v->files_[level][i]->smallest;
+                        if(vset_->icmp_.Compare(prev_end, this_begin) >= 0) {
+                            std::fprintf(stderr, "overlapping ranges in same level % s vs. %s\n",
+                                          prev_end.DebugString().c_str(), this_begin.DebugString().c_str());
+                            std::abort();
+                        }
+                    }
+                }
+#endif
+            }
+        }
+
+        // Added new version files checks
+        // v is builded for next version, so not do is deletion
+        void MaybeAddFile(Version* v, int level, FileMetaData* f) {
+            if (level_[level].deleted_files.count(f->number) > 0) {
+                // File is deleted: do nothing
+            } else {
+                std::vector<FileMetaData*>* files = &v->files_[level];
+                if (level > 0 && !files->empty()) {
+                    // Must not overlap
+                    assert(vset_->icmp_.Compare((*files)[files->size() - 1]->largest, f->smallest) < 0);
+                }
+                f->refs++;
+                files->push_back(f);
+            }
+        }
+
+
     private:
+        // Custom sort for set
         struct BySmallestKey {
             const InternalKeyComparator* internal_comparator;
 
@@ -572,5 +676,128 @@ class VersionSet::Builder {
         Version* base_;
         LevelState level_[config::kNumLevels];
 };
+
+VersionSet::VersionSet(const std::string& dbname, const Options* options, TableCache* table_cache, const InternalKeyComparator* cmp)
+        : env_(options->env), 
+          dbname_(dbname), 
+          options_(options), 
+          table_cache_(table_cache), 
+          icmp_(*cmp), 
+          next_file_number_(2), 
+          manifest_file_number_(0), 
+          last_sequence_(0), 
+          log_number_(0),
+          prev_log_number_(0), 
+          descriptor_file_(nullptr),
+          descriptor_log_(nullptr),
+          dummy_versions_(this),
+          current_(nullptr) {
+    AppendVersion(new Version(this));
+}
+
+VersionSet::~VersionSet() {
+    current_->Unref();
+    assert(dummy_versions_.next_ == &dummy_versions_);
+    delete descriptor_log_;
+    delete descriptor_file_;
+}
+
+void VersionSet::AppendVersion(Version* v) {
+    assert(v->refs_ == 0);
+    assert(v != current_);
+    if (current_ != nullptr) {
+        current_->Unref();
+    }
+    current_ = v;
+    v->Ref();
+
+    // Append to linked list (Double linked list)
+    v->prev_ = dummy_versions_.prev_;
+    v->next_ = &dummy_versions_;
+    v->prev_->next_ = v;
+    v->next_->prev_ = v;
+}
+
+Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
+    if (edit->has_log_number_) {
+        assert(edit->log_number_ >= log_number_);
+        assert(edit->log_number_ < next_file_number_);
+    } else {
+        edit->SetLogNumber(log_number_);
+    }
+
+    if (!edit->has_prev_log_number_) {
+        edit->SetPrevLogNumber(prev_log_number_);
+    }
+
+    edit->SetNextFile(next_file_number_);
+    edit->SetLastSequence(last_sequence_);
+
+    Version* v = new Version(this);
+    {
+        Builder buider(this, current_);
+        buider.Apply(edit);
+        buider.SaveTo(v);
+    }
+    Finalize(v);
+
+    // Initialize new descriptor log file.
+    // if necessary by creating a temporary file that contains a snapshot of the current version.
+    std::string new_manifest_file;
+    Status s;
+    if (descriptor_log_ == nullptr) {
+        assert(descriptor_file_ == nullptr);
+        new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
+        s = env_->NewWriteFile(new_manifest_file, &descriptor_file_);
+        if (s.ok()) {
+            descriptor_log_ = new log::Writer(descriptor_file_);
+            s = WriteSnapshot(descriptor_log_);
+        }
+    }
+
+    // Unlock during expensive MANIFEST log write
+    {
+        mu->Unlock();
+
+        // Write new record to MANIFEST log
+        if (s.ok()) {
+            std::string record;
+            edit->EncodeTo(&record);
+            s = descriptor_log_->AddRecord(record);
+            if (s.ok()) {
+                s = descriptor_file_->Sync();
+            }
+            if (!s.ok()) {
+                Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
+            }
+        }
+
+        // If we just created a new descriptor fill.
+        // install it by writing a new CURRENT file that points to it.
+        if (s.ok() && !new_manifest_file.empty()) {
+            s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+        }
+
+        mu->Lock();
+    }
+
+    // Install the new version
+    if (s.ok()) {
+        AppendVersion(v);
+        log_number_ = edit->log_number_;
+        prev_log_number_ = edit->prev_log_number_;
+    } else {
+        delete v;
+        if (!new_manifest_file.empty()) {
+            delete descriptor_log_;
+            delete descriptor_file_;
+            descriptor_log_ = nullptr;
+            descriptor_file_ = nullptr;
+            env_->RemoveFile(new_manifest_file);
+        }
+    }
+
+    return s;
+}
 
 }

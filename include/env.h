@@ -112,4 +112,22 @@ class RandomAccessFile {
         virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const = 0;
 };
 
+class Logger {
+    public:
+        Logger() = default;
+
+        Logger(const Logger&) = delete;
+        Logger& operator=(const Logger&) = delete;
+
+        virtual ~Logger();
+
+        virtual void Logv(const char* format, std::va_list ap) = 0;
+};
+
+void Log(Logger* info_log, const char* format, ...)
+#if defined(__GUNC__) || defined (__clang__)
+    __attribute__((__format__(__printf__, 2, 3)))
+#endif
+    ;
+
 }

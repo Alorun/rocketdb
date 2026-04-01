@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -11,6 +12,7 @@
 #include "../port/thread_annotations.h"
 #include "../../include/options.h"
 #include "table_cache.h"
+#include "../port/port_stdcxx.h"
 
 namespace rocketdb {
 
@@ -39,39 +41,39 @@ class Version {
             int seek_file_level;
         };
 
-        // Append to *iter a sequence of iterators that will yield the contains of this Version when merged together
+        // Append to *iter a sequence of iterators that will yield the contains of this Version when merged together.
         void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
         // Lookup the value for key
         Status Get(const ReadOptions&, const LookupKey& key, std::string* val, GetStats* stats);
 
-        // Add stats into the current state, resonsible to reduce allowed_seeks
-        // When allowed_seeks == 0, wake up the thread to compaction
+        // Add stats into the current state, resonsible to reduce allowed_seeks.
+        // When allowed_seeks == 0, wake up the thread to compaction.
         bool UpdateStats(const GetStats& stats);
 
-        // Trigger to compaction base on Seek
+        // Trigger to compaction base on Seek.
         bool RecordReadSample(Slice key);
 
-        // Reference count management
+        // Reference count management.
         void Ref();
         void Unref();
 
-        // Return a level of all files to input
+        // Return a level of all files to input.
         void GetOverlappingInputs(int level, const InternalKey* begin, const InternalKey* end, std::vector<FileMetaData*>* inoputs);
 
-        // Returns true iff some file in the specified level overlaps
+        // Returns true iff some file in the specified level overlaps.
         // some part of [*smallest_user_key,*largest_user_key].
         // smallest_user_key==nullptr represents a key smaller than all the DB's keys.
         // largest_user_key==nullptr represents a key largest than all the DB's keys.
         bool OverlapInLevel(int level, const Slice* smallest_user_key, const Slice* largest_user_key);
 
-        // Return the level at which we should place a new memtable compaction
+        // Return the level at which we should place a new memtable compaction.
         // result that covers the range [smallest_user_key,largest_user_key].
         int PickLevelForMemTableOutput(const Slice& smallest_user_key, const Slice& largest_user_key);
 
         int NumFiles(int level) const { return files_[level].size(); }
 
-        // Return a human readable string that descrbes this version's contents
+        // Return a human readable string that descrbes this version's contents.
         std::string DebugString() const;
 
     private:
@@ -97,10 +99,10 @@ class Version {
         Version* prev_;         // Prev Version
         int refs_;              // When version's refs == 0, it need to delete
 
-        // Every level of file metadata
+        // Every level of file metadata.
         std::vector<FileMetaData*> files_[config::kNumLevels];
 
-        // Next file to compact based on seek stats(allowed_seeks)
+        // Next file to compact based on seek stats(allowed_seeks).
         FileMetaData* file_to_compact_;     
         int file_to_compac_level;
 
@@ -117,24 +119,110 @@ class VersionSet {
 
         ~VersionSet();
 
+        // Apply *edit to the current version to form a new descriptor.
+        // It is saved to persistent state and installed as the new current version.
+        // Requires holding mute and make sure no other thread concurrently calls LogAndApply().
+        Status LogAndApply(VersionEdit* edit, port::Mutex* mu) EXCLUSIVE_LOCKS_REQUIRED(mu);
+
+        // Recover the last saved descriptor from persistent storage (Restart and use).
+        Status Recover(bool* save_manifest);
+
+        // Return the current version.
+        Version* current() const { return current_; }
+
+        // Return the current manifest file number.
+        uint64_t ManifestFileNumber() const { return manifest_file_number_; }
+
+        // Allocate and return a new file number.
+        uint64_t NewFileNumber() { return next_file_number_++; }
+
+        // Arrange to reuse "file_number" unless a newer file number has already been allocated.
+        void ReuseFileNumber(uint64_t file_number) {
+            if (next_file_number_ == file_number + 1) {
+                next_file_number_ = file_number;
+            }
+        }
+
+        // Return the number fo Table files at the specified level.
+        int NumLevelFiles(int level) const;
+
+        // Return the combined file size of all files at the specified level.
+        int64_t NumLevelBytes(int level) const;
+
+        // Return the last sequence number.
+        int64_t LastSequence() const { return last_sequence_; }
+
+        // Set the last sequence number to s.
+        void SetLastSequence(uint64_t s) {
+            assert(s >= last_sequence_);
+            last_sequence_ = s;
+        }
+
+        // Mark the specified file number as used.
+        void MarkFileNumberUsed(uint64_t number);
+
+        // Return the current log file number.
+        uint64_t LogNumber() const { return log_number_; }
+
+        // Return the log file number for the log file that is currently being compacted.
+        uint64_t PrevLogNumber() const { return prev_log_number_; } 
+
+        // Pick level and inputs for a new compaction.
+        // Return a heap-allocated object that descibes the compaction, or return nullptr.
+        // Caller should delete the result.
+        Compaction* PickCompaction();
+
+        // Compacting the range [begin,end] in specified level.
+        // Return a heap-allocated object that descibes the compaction, or return nullptr.
+        // Caller should delete the result.
+        Compaction* CompactRange(int level, const InternalKey* begin, const InternalKey* end);
+
+        // Rerturn the maxinum overlapping data at next level for any file.
+        int64_t MaxNextLevelOverlappingBytes();
+
+        // Create an iterator that reads over the compaction inputs for "*c".
+        Iterator* MakeInputIterator(Compaction* c);
+
+        // Return true iff some level needs a compaction.
+        bool NeedsCompaction() const {
+            Version* v = current_;
+            return (v->compaction_score_ > 1) || (v->file_to_compact_ != nullptr);
+        }
+
+        // Add all files listed in any live version to *live.
+        void AddLiveFiles(std::set<uint64_t>* live);
+
+        // Return the approximate offset in the database of the data for "key" as of version "v".
+        uint64_t ApproximateOffsetOf(Version* v, const InternalKey& key);
+
+        // Return the human-readable short summary of the number of files per level.
+        struct LevelSummaryStorage {
+            char buffer[100];
+        };
+        const char* LevelSummary(LevelSummaryStorage* scratch) const;
+
     private:
         class Builder;
 
         friend class Compaction;
         friend class Version;
 
+        // Reuse MANIFEST file for restart database.
         bool ReuseManifest(const std::string& dscname, const std::string& dscbase);
 
+        // Assess whether each level requires compaction.
         void Finalize(Version* v);
 
+        // For PickCompaction, determine the scope of compaction.
         void GetRange(const std::vector<FileMetaData*>& inputs, InternalKey* smallest, InternalKey* largest);
-
         void GetRange2(const std::vector<FileMetaData*>& inputs1, const std::vector<FileMetaData*>& input2,
                        InternalKey* smallest, InternalKey* largest);
-
         void SetupOtherInputs(Compaction* c);
 
+        // Save current contents to *log.
         Status WriteSnapshot(log::Writer* log);
+
+        // Real update version.
         void AppendVersion(Version* v);
 
         Env* const env_;
@@ -142,18 +230,20 @@ class VersionSet {
         const Options* const options_;
         TableCache* const table_cache_;
         const InternalKeyComparator icmp_;
-        uint64_t next_file_number;
-        uint64_t mainifest_file_number_;
+
+        uint64_t next_file_number_;
+        uint64_t manifest_file_number_;     // Matedata log file number
         uint64_t last_sequence_;
-        uint64_t log_number_;
-        uint64_t prev_log_number_;
+        uint64_t log_number_;               // Currently write log file number
+        uint64_t prev_log_number_;          // Prev write log file number (Fault recovery)
 
-        WritableFile* descriptor_file_;
-        log::Writer* descriptor_log_;
+        WritableFile* descriptor_file_;     // Manifest driect disk write
+        log::Writer* descriptor_log_;       // Manifest formatted and packaged for writing to disk
 
-        Version dummy_versions_;
-        Version* current_;
+        Version dummy_versions_;            // fake head version
+        Version* current_;                  // The newest version
 
+        // Store the key that was compressed to in the last compression at each layer.
         std::string compact_pointer_[config::kNumLevels];
 };
 
