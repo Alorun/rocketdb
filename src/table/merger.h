@@ -1,6 +1,6 @@
 #pragma once
 
-namespace leveldb {
+namespace rocketdb {
 
 class Comparator;
 class Iterator;

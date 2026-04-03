@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -83,7 +84,7 @@ class Version {
         class LevelFileNumIterator;
 
         explicit Version(VersionSet* vset) : vset_(vset), next_(this), prev_(this), refs_(0), file_to_compact_(nullptr),
-                file_to_compac_level(-1), compaction_score_(-1), compaction_level_(-1) {}
+                file_to_compact_level(-1), compaction_score_(-1), compaction_level_(-1) {}
 
         Version(const Version&) = delete;
         Version& operator=(const Version&) = delete;
@@ -104,7 +105,7 @@ class Version {
 
         // Next file to compact based on seek stats(allowed_seeks).
         FileMetaData* file_to_compact_;     
-        int file_to_compac_level;
+        int file_to_compact_level;
 
         double compaction_score_;   // If the score > 1, the mean this need to compaction
         int compaction_level_;      // The highest priority level to be compaction
@@ -248,7 +249,48 @@ class VersionSet {
 };
 
 class Compaction {
+    public:
+        ~Compaction();
 
+        int level() const { return level_; }
+
+        VersionEdit* edit() { return &edit_; }
+
+        int num_input_files(int which) const { return inputs_[which].size(); }
+
+        FileMetaData* input(int which, int i) const { return inputs_[which][i]; }
+
+        uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
+
+        bool IsTrivialMove() const;
+
+        void AddInputDeletions(VersionEdit* edit);
+
+        bool IsBaseLevelForKey(const Slice& user_key);
+
+        bool ShouldStopBefore(const Slice& internal_key);
+
+        void ReleaseInputs();
+
+    private:
+        friend class Version;
+        friend class VersionSet;
+
+        Compaction(const Options* options, int level);
+
+        int level_;
+        uint64_t max_output_file_size_;
+        Version* input_version_;
+        VersionEdit edit_;
+
+        std::vector<FileMetaData*> inputs_[2];
+
+        std::vector<FileMetaData*> grandparents_;
+        size_t grandparent_index_;
+        bool seen_key_;
+        int64_t overlapped_bytes_;
+
+        size_t level_ptrs_[config::kNumLevels];
 };
 
 
