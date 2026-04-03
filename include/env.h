@@ -130,4 +130,9 @@ void Log(Logger* info_log, const char* format, ...)
 #endif
     ;
 
+Status WriteStringToFile(Env* env, const Slice& data, const std::string& fname);
+
+Status ReadFileToString(Env* env, const std::string& fname, const std::string* data);
+
+
 }

@@ -800,4 +800,223 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     return s;
 }
 
+Status VersionSet::Recover(bool* save_manifest) {
+    struct LogReporter : public log::Reader::Reporter {
+        Status* status;
+        void Corruption(size_t bytes, const Status& s) override {
+            if (this->status->ok()) *this->status = s;
+        }
+
+    };
+
+    std::string current;
+    Status s = ReadFileToString(env_, CurrentFileName(dbname_), &current);
+    if (!s.ok()) {
+        return s;
+    }
+    if (current.empty() || current[current.size() - 1] != '\n') {
+        return Status::Corruption("CURRENT file dose not end with newline");
+    }
+    current.resize(current.size() - 1);
+
+    std::string dsname = dbname_ + "/" + current;
+    SequentialFile* file;
+    s = env_->NewSequentialFile(dsname, &file);
+    if (!s.ok()) {
+        if (s.IsNotFound()) {
+            return Status::Corruption("CURRENT points to  a non-existent file", s.ToString());
+        }
+        return s;
+    }
+
+    bool have_log_number = false;
+    bool have_prev_log_number = false;
+    bool have_next_file = false;
+    bool have_last_sequence = false;
+    uint64_t next_file = 0;
+    uint64_t last_sequence = 0;
+    uint64_t log_number = 0;
+    uint64_t prev_log_number = 0;
+    Builder builder(this, current_);
+    int read_records = 0;
+
+    {
+        LogReporter reporter;
+        reporter.status = &s;
+        log::Reader reader(file, &reporter, true, 0);
+        Slice record;
+        std::string scratch;
+        while (reader.ReaderRecord(&record, &scratch)) {
+            ++read_records;
+            VersionEdit edit;
+            s = edit.DecodeFrom(record);
+            if (s.ok()) {
+                if (edit.has_comparator_ && edit.comparator_ != icmp_.user_comparator()->Name()) {
+                    s = Status::InvalidArgument(edit.comparator_ + " does not match existing comparator ",
+                                                icmp_.user_comparator()->Name());
+                }
+            }
+
+            if (s.ok()) {
+                builder.Apply(&edit);
+            }
+
+            if (edit.has_log_number_) {
+                log_number = edit.log_number_;
+                have_log_number = true;
+            }
+
+            if (edit.has_prev_log_number_) {
+                prev_log_number = edit.prev_log_number_;
+                have_prev_log_number = true;
+            }
+
+            if (edit.has_next_file_number_) {
+                next_file_number_ = edit.next_file_number_;
+                have_next_file = true;
+            }
+
+            if (edit.has_last_sequence_) {
+                last_sequence_ = edit.last_sequence_;
+                have_last_sequence = true;
+            }
+        }
+    }
+    delete file;
+    file = nullptr;
+
+    if (s.ok()) {
+        if (!have_next_file) {
+            s = Status::Corruption("no meta-nextfile entry in descriptor");
+        } else if (!have_log_number) {
+            s = Status::Corruption("no meta-lognumber entry in descriptor");
+        } else if (!have_last_sequence) {
+            s = Status::Corruption("no last-sequence-number entry in descriptor");
+        }
+
+        if (!have_prev_log_number) {
+            prev_log_number = 0;
+        }
+
+        MarkFileNumberUsed(prev_log_number);
+        MarkFileNumberUsed(log_number);
+    }
+
+    if (s.ok()) {
+        Version* v = new Version(this);
+        builder.SaveTo(v);
+        Finalize(v);
+        AppendVersion(v);
+        manifest_file_number_ = next_file;
+        next_file_number_ = next_file + 1;
+        last_sequence_ = last_sequence;
+        log_number = log_number;
+        prev_log_number_ = prev_log_number;
+
+        if (ReuseManifest(dsname, current)) {
+
+        } else {
+            *save_manifest = true;
+        }
+    } else {
+        std::string error = s.ToString();
+        Log(options_->info_log, "Error recovering version set with %d record: %s", read_records, error.c_str());
+    }
+
+    return s;
+}
+
+bool VersionSet::ReuseManifest(const std::string& dsname, const std::string& dscbase) {
+    if (!options_->reuse_logs) {
+        return false;
+    }
+    FileType manifest_type;
+    uint64_t manifest_number;
+    uint64_t manifest_size;
+    if (!ParseFileName(dscbase, &manifest_number, &manifest_type) || manifest_type != kDescriptorFile ||
+        !env_->GetFileSize(dsname, &manifest_size).ok() || 
+        // Make new compacted MANIFEST if old one is too big
+        manifest_size >= TargetFileSize(options_)) {
+        return false;
+    }
+
+    assert(descriptor_file_ == nullptr);
+    assert(descriptor_log_ == nullptr);
+    Status r = env_->NewAppendableFile(dsname, &descriptor_file_);
+    if (!r.ok()) {
+        Log(options_->info_log, "Reuse MANIFEST: %s\n", r.ToString().c_str());
+        assert(descriptor_file_ == nullptr);
+        return false;
+    }
+
+    Log(options_->info_log, "Reusing MANISEST %s\n", dsname.c_str());
+    descriptor_log_ = new log::Writer(descriptor_file_, manifest_size);
+    manifest_file_number_ = manifest_number;
+    return true;
+}
+
+void VersionSet::MarkFileNumberUsed(uint64_t number) {
+    if (next_file_number_ <= number) {
+        next_file_number_ = number + 1;
+    }
+}
+
+void VersionSet::Finalize(Version* v) {
+    // Precomputed best level for mext compaction
+    int best_level = -1;
+    double best_score = -1;
+
+    for (int level = 0; level < config::kNumLevels - 1; level++) {
+        double score;
+        if (level == 0) {
+            score = v->files_[level].size() / static_cast<double>(config::kLO_CompactionTrigger);
+        } else {
+            const uint64_t level_bytes = TotalFileSize(v->files_[level]);
+            score = static_cast<double>(level_bytes) / MaxBytesForLevel(options_, level);
+        }
+
+        if (score > best_score) {
+            best_level = level;
+            best_score = score;
+        }
+    }
+
+    v->compaction_level_ = best_level;
+    v->compaction_score_ = best_score;
+}
+
+Status VersionSet::WriteSnapshot(log::Writer* log) {
+    // Save metadata
+    VersionEdit edit;
+    edit.SetComparatorName(icmp_.user_comparator()->Name());
+
+    // Save compaction pointers
+    for (int level = 0; level < config::kNumLevels; level++) {
+        if (!compact_pointer_[level].empty()) {
+            InternalKey key;
+            key.DecodeFrom(compact_pointer_[level]);
+            edit.SetCompectorPointer(level, key);
+        }
+    }
+
+    // Save files
+    for (int level = 0; level < config::kNumLevels; level++) {
+        const std::vector<FileMetaData*>& files = current_->files_[level];
+        for (size_t i = 0; i < files.size(); i++) {
+            const FileMetaData* f = files[i];
+            edit.AddFile(level, f->number, f->file_size, f->smallest, f->largest);
+        }
+    }
+
+    std::string record;
+    edit.EncodeTo(&record);
+    return log->AddRecord(record);
+}
+
+int VersionSet::NumLevelFiles(int level) const {
+    assert(level >= 0);
+    assert(level <= config::kNumLevels);
+    return current_->files_[level].size();
+}
+
 }
