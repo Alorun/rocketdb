@@ -252,24 +252,36 @@ class Compaction {
     public:
         ~Compaction();
 
+        // Return the level that is being compacted.
         int level() const { return level_; }
 
+        // Return the object that holds the edits to the descriptor done by this compaction.
         VersionEdit* edit() { return &edit_; }
 
         int num_input_files(int which) const { return inputs_[which].size(); }
 
+        // Return the ith input file at "level()+which"
         FileMetaData* input(int which, int i) const { return inputs_[which][i]; }
 
+        // Maximun size of files to build during this compaction.
         uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
 
+        // Is this a trivial compaction that can be implemented by just moving a single input file to the next level.
         bool IsTrivialMove() const;
 
+        // Add all inputs to this compaction as delete operations to *edit.
         void AddInputDeletions(VersionEdit* edit);
 
+        // Return true if the information we have avaible guarantees.
+        // The compaction is producing data in "level+1" for which no data exists in levels greater than "level+1".
+        // For Delete a key.
         bool IsBaseLevelForKey(const Slice& user_key);
 
+        // Return true iff we should stop building the current output before processing "internal_key".
+        // It depends currently compact file size overlapping with grandparent.
         bool ShouldStopBefore(const Slice& internal_key);
 
+        // Release the input version for the compaction, once the compaction is successful.
         void ReleaseInputs();
 
     private:
@@ -283,13 +295,16 @@ class Compaction {
         Version* input_version_;
         VersionEdit edit_;
 
+        // File participating in compaction at level and level+1.
         std::vector<FileMetaData*> inputs_[2];
 
+        // State used to check for number of overlapping grandparent files.
         std::vector<FileMetaData*> grandparents_;
-        size_t grandparent_index_;
-        bool seen_key_;
-        int64_t overlapped_bytes_;
+        size_t grandparent_index_;      // Index in grandparent_starts_
+        bool seen_key_;                 // Some input key has been seen
+        int64_t overlapped_bytes_;      // Bytes of overlap between current output and grandparent files
 
+        // State for implementing IsBaseLevelForKey.
         size_t level_ptrs_[config::kNumLevels];
 };
 

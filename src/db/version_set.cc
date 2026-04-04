@@ -1258,23 +1258,31 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
     const int level = c->level();
     InternalKey smallest, largest;
 
+    // Ensure the boundaries of this level are clean
     AddBoundaryInputs(icmp_, current_->files_[level], &c->inputs_[0]);
     GetRange(c->inputs_[0], &smallest, &largest);
 
+    // Ensure the boundaries of next level are clean
     current_->GetOverlappingInputs(level + 1, &smallest, &largest, &c->inputs_[1]);
     AddBoundaryInputs(icmp_, current_->files_[level + 1], &c->inputs_[1]);
 
+    // Get entire range covered by compaction
     InternalKey all_start, all_limit;
     GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
 
+    // See if we can grow the number of inputs in "level" without changing the number of "level + 1" file we pick up
     if (!c->inputs_[1].empty()) {
         std::vector<FileMetaData*> expanded0;
         current_->GetOverlappingInputs(level, &all_start, &all_limit, &expanded0);
         AddBoundaryInputs(icmp_, current_->files_[level], &expanded0);
+
         const int64_t inputs0_size = TotalFileSize(c->inputs_[0]);
         const int64_t inputs1_size = TotalFileSize(c->inputs_[1]);
         const int64_t expanded0_size = TotalFileSize(expanded0);
+
         if (expanded0.size() > c->inputs_[0].size() && inputs1_size + expanded0_size < ExpandedCompactionByteSizeLimit(options_)) {
+            // The boundary expansion was successful.
+            // the validation range at the next higher level remained unchanged.
             InternalKey new_start, new_limit;
             GetRange(expanded0, &new_start, &new_limit);
             std::vector<FileMetaData*> expanded1;
@@ -1293,6 +1301,8 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
         }
     }
 
+    // Compute the set of grandparent files that overlop this compction.
+    // Prevet merged files from becoming too large
     if (level + 2 < config::kNumLevels) {
         current_->GetOverlappingInputs(level + 1, &all_start, &all_limit, &c->grandparents_);
     }
@@ -1308,6 +1318,7 @@ Compaction* VersionSet::CompactRange(int level, const InternalKey* begin, const 
         return nullptr;
     }
 
+    // Avoid compacting too much in one shot in case the range is large.
     if (level > 0) {
         const uint64_t limit = MaxFileSizeForLevel(options_, level);
         uint64_t total = 0;
@@ -1349,10 +1360,12 @@ void Compaction::AddInputDeletions(VersionEdit* edit) {
     }
 }
 
+// It will be called in a loop during user.
 bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
     const Comparator* user_cmp = input_version_->vset_->icmp_.user_comparator();
     for (int level = level_ + 2; level < config::kNumLevels; level++) {
         const std::vector<FileMetaData*>& files = input_version_->files_[level];
+        // Use level_ptrs_ optimize the search base on increasing key
         while (level_ptrs_[level] < files.size()) {
             FileMetaData* f = files[level_ptrs_[level]];
             if (user_cmp->Compare(user_key, f->largest.user_key()) <= 0) {
@@ -1367,11 +1380,14 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
     return true;
 }
 
+// It will be called in a loop during user.
 bool Compaction::ShouldStopBefore(const Slice& internal_key) {
     const VersionSet* vset = input_version_->vset_;
+    // Scan to find earliest grandparent file that contains key.
     const InternalKeyComparator* icmp = &vset->icmp_;
     while (grandparent_index_ < grandparents_.size() &&
            icmp->Compare(internal_key, grandparents_[grandparent_index_]->largest.Encode()) > 0) {
+        // Prevent new file lead to spurious calculations.
         if (seen_key_) {
             overlapped_bytes_ += grandparents_[grandparent_index_]->file_size;
         }
@@ -1380,6 +1396,7 @@ bool Compaction::ShouldStopBefore(const Slice& internal_key) {
     seen_key_ = true;
 
     if (overlapped_bytes_ > MaxGrandParentOverlapBytes(vset->options_)) {
+        // Too much overlap for current output, start new output.
         overlapped_bytes_ = 0;
         return true;
     } else {
