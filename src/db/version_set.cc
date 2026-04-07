@@ -6,25 +6,23 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <iostream>
 #include <vector>
 
 #include "dbformat.h"
+#include "filename.h"
+#include "memtable.h"
+#include "table_cache.h"
+#include "version_edit.h"
 #include "../wal/log_reader.h"
 #include "../wal/log_writer.h"
-#include "memtable.h"
-#include "../../include/env.h"
-#include "../../include/table_builder.h"
-#include "../table/merger.h"
-#include "../table/two_level_iterator.h"
 #include "../util/coding.h"
 #include "../util/logging.h"
-#include "../../include/options.h"
-#include "version_edit.h"
-#include "table_cache.h"
-#include "filename.h"
 #include "../util/logging.h"
-
+#include "../table/merger.h"
+#include "../table/two_level_iterator.h"
+#include "../../include/env.h"
+#include "../../include/table_builder.h"
+#include "../../include/options.h"
 
 namespace rocketdb {
 

@@ -46,8 +46,8 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
     *non_shared = reinterpret_cast<const uint8_t*>(p)[1];
     *value_length = reinterpret_cast<const uint8_t*>(p)[2];
     if ((*shared | *non_shared | *value_length) < 128) {
-        // Fast path: all three values are encoded in one byte each
-        // Three numbers use varint format
+        // Fast path: all three values are encoded in one byte each.
+        // Three numbers use varint format.
         p += 3;
     } else {
         if ((p = GetVarint32Ptr(p, limit, shared)) == nullptr) return nullptr;

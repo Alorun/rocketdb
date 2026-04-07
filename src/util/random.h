@@ -29,6 +29,7 @@ class Random {
             return seed_;
         }
 
+        // Return a random number < n
         uint32_t Uniform(int n) { return Next() % n; }
 
         // The probability og obtaining 1/n

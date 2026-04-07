@@ -53,8 +53,8 @@ struct TableBuilder::Rep {
     bool closed;  // Either Finish() or Abandon() has been called
     FilterBlockBuilder* filter_block;
 
-    // We do not emit the index entry for a block until we have seen the first key for the next data block
-    // This allows us to use shorter keys in the index block
+    // We do not emit the index entry for a block until we have seen the first key for the next data block.
+    // This allows us to use shorter keys in the index block.
     bool pending_index_entry;
     BlockHandle pendnig_handle;  // handle to add to index block
 

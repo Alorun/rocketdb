@@ -8,12 +8,10 @@
 #include <vector>
 
 #include "dbformat.h"
-#include "version_edit.h"
-#include "../port/port.h"
-#include "../port/thread_annotations.h"
-#include "../../include/options.h"
 #include "table_cache.h"
+#include "version_edit.h"
 #include "../port/port_stdcxx.h"
+#include "../../include/options.h"
 
 namespace rocketdb {
 

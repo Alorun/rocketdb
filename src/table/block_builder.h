@@ -11,16 +11,16 @@ namespace rocketdb {
 struct Options;
 
 // An entry for a particular key-value pair has the form:
-//     shared_bytes: varint32
-//     unshared_bytes: varint32
-//     value_length: varint32
-//     key_delta: char[unshared_bytes]
-//     value: char[value_length]
+//     shared_bytes:    varint32
+//     unshared_bytes:  varint32
+//     value_length:    varint32
+//     key_delta:       char[unshared_bytes]
+//     value:           char[value_length]
 // shared_bytes == 0 for restart points.
 //
 // The trailer of the block has the form:
-//     restarts: uint32[num_restarts]
-//     num_restarts: uint32
+//     restarts:        uint32[num_restarts]
+//     num_restarts:    uint32
 // restarts[i] contains the offset within the block of the ith restart point.
 class BlockBuilder {
     public:

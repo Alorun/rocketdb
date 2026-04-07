@@ -22,36 +22,36 @@ class TableBuilder {
 
         ~TableBuilder();
 
-        // Change the options used by this builder
+        // Change the options used by this builder.
         Status ChangeOptions(const Options& options);
 
-        // Add key, vlaue to the table being constructed
-        // REQUIRES: key is after any previously added key according to comparator
-        // REQUIRES: Finish(), Abandon() have not been called
+        // Add key, vlaue to the table being constructed.
+        // REQUIRES: key is after any previously added key according to comparator.
+        // REQUIRES: Finish(), Abandon() have not been called.
         void Add(const Slice& key, const Slice& value);
 
-        // Advance operation: flush any buffered key/value pairs to file
-        // Can be used to ensure that two adjacent entries never live in the same data block
-        // REQUIRES: Finish(), Abandon() have not been called
+        // Advance operation: flush any buffered key/value pairs to file.
+        // Can be used to ensure that two adjacent entries never live in the same data block.
+        // REQUIRES: Finish(), Abandon() have not been called.
         void Flush();
 
-        // Return non-ok iff some error has been detected
+        // Return non-ok iff some error has been detected.
         Status status() const;
 
-        // Finish building the table
-        // Stop using the file passed to the constructor after the function returns
-        // REQUIRES: Finish(), Abandon() have not been called
+        // Finish building the table.
+        // Stop using the file passed to the constructor after the function returns.
+        // REQUIRES: Finish(), Abandon() have not been called.
         Status Finish();
 
-        // Indicate that the contents of this builder should be abandoned
-        // Stop using the file passed to the constructor after the function returns
-        // REQUIRES: Finish(), Abandon() have not been called
+        // Indicate that the contents of this builder should be abandoned.
+        // Stop using the file passed to the constructor after the function returns.
+        // REQUIRES: Finish(), Abandon() have not been called.
         void Abandon();
 
-        // Number of calls to Add() so far
+        // Number of calls to Add() so far.
         uint64_t NumEntries() const;
 
-        // Size of the file generated so far
+        // Size of the file generated so far.
         uint64_t FileSize() const;
 
     private:
