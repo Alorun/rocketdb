@@ -70,7 +70,6 @@ class Env {
         virtual void SleepForMicroseconds(int micros) = 0;
 };  
 
-
 class SequentialFile {
     public:
         SequentialFile() = default;
@@ -122,6 +121,17 @@ class Logger {
         virtual ~Logger();
 
         virtual void Logv(const char* format, std::va_list ap) = 0;
+};
+
+// Identifies a locked file
+class FileLock {
+    public:
+        FileLock() = default;
+
+        FileLock(const FileLock&) = delete;
+        const FileLock operator=(const FileLock&) = delete;
+
+        virtual ~FileLock();
 };
 
 void Log(Logger* info_log, const char* format, ...)
