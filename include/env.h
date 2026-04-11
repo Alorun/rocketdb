@@ -65,6 +65,7 @@ class Env {
 
         virtual Status NewLogger(const std::string& fname, Logger** result) = 0;
 
+        // Get the current microsecond timestamp of the system
         virtual uint64_t NowMicros() = 0;
 
         virtual void SleepForMicroseconds(int micros) = 0;

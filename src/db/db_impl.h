@@ -34,6 +34,22 @@ class DBImpl : public DB {
         Status Delete(const WriteOptions&, const Slice& key) override;
         Status Write(const WriteOptions& options, WriteBatch* updates) override;
         Status Get(const ReadOptions& options, const Slice& key, std::string* value) override;
+        Iterator* NewIterator(const ReadOptions&) override;
+        const Snapshot* GetSnapshot() override;
+        void ReleaseSnapshot(const Snapshot* snapshot) override;
+        bool GetProperty(const Slice& property, std::string* value) override;
+        void GetApproximateSizes(const Range* range, int n, uint64_t* sizes) override;
+        void CompactRange(const Slice* begin, const Slice* end) override;
+
+        void TEST_CompactRange(int level, const Slice* begin, const Slice* end);
+
+        Status TEST_CompactMemTable();
+
+        Iterator* TEST_NewInternalIterator();
+
+        int64_t TEST_MaxNextLevelOverlappingBytes();
+
+        void RecordReadSample(Slice key);
 
     private:
         friend class DB;
@@ -73,6 +89,21 @@ class DBImpl : public DB {
 
         // Delete any unneeded files and stale in-memory entries
         void RemoveObsoleteFiles() EXCLUSIVE_LOCKS_REQUIRED(mutex_);   
+
+        void CompactMemTable() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
+                              VersionEdit* edit, SequenceNumber* max_sequence) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        Status MakeRoomForWirte(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        WriteBatch* BuildBatchGroup(Writer** last_writer) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        void RecordBackgroundError(const Status& s);
+
+        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        static void BGWork(void* db);
 
         const Comparator* user_comparator() const {
             return internal_comparator_.user_comparator();

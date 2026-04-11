@@ -107,6 +107,7 @@ static bool BeforeFile(const Comparator* ucmp, const Slice* user_key, const File
 bool SomeFileOverlapsRange(const InternalKeyComparator &icmp, bool disjoint_sorted_file, std::vector<FileMetaData *> &files,
                            const Slice *smallest_user_key, const Slice *largest_user_key) {
     const Comparator* ucmp = icmp.user_comparator();
+    // Level = 0
     if (!disjoint_sorted_file) {
         for (size_t i = 0; i < files.size(); i++) {
             const FileMetaData* f = files[i];
@@ -120,6 +121,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator &icmp, bool disjoint_sort
         return false;
     }
     
+    // Level > 0
     uint32_t index = 0;
     if (smallest_user_key != nullptr) {
         InternalKey small_key(*smallest_user_key, kMaxSequenceNumber, kValueTypeForSeek);
