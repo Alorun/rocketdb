@@ -33,7 +33,7 @@ class Env {
 
         virtual Status NewRandomAccessFile(const std::string& fname, RandomAccessFile** result) = 0;
 
-        virtual Status NewWriteFile(const std::string& fname, WritableFile** result) = 0;
+        virtual Status NewWritableFile(const std::string& fname, WritableFile** result) = 0;
 
         virtual Status NewAppendableFile(const std::string& fname, WritableFile** result) = 0;
 

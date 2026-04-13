@@ -104,6 +104,14 @@ class DBImpl : public DB {
 
         void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
         static void BGWork(void* db);
+        void BackgroundCall();
+        void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        void CleanupCompaction(CompactionState* compact) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        Status DoCompactionWork(CompactionState* compact) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        
+        Status OpenCompactionOutputFile(CompactionState* compact);
+        Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
+        Status InstallCompactionResults(CompactionState* compact) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         const Comparator* user_comparator() const {
             return internal_comparator_.user_comparator();
@@ -150,6 +158,7 @@ class DBImpl : public DB {
         // Has a background compaction been scheduled or is running?
         bool background_compaction_scheduled_ GUARDED_BY(mutex_);
 
+        // Save manually compaction parameters
         ManualCompaction* manual_compaction_ GUARDED_BY(mutex_);
 
         VersionSet* const versions_ GUARDED_BY(mutex_);

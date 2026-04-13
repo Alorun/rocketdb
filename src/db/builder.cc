@@ -23,7 +23,7 @@ Status BuildTable(const std::string& dbname, Env *env, const Options &options,
     if (iter->Valid()) {
         // Create new file
         WritableFile* file;
-        s = env->NewWriteFile(fname, &file);
+        s = env->NewWritableFile(fname, &file);
         if (!s.ok()) {
             return s;
         }
