@@ -97,7 +97,7 @@ class DBImpl : public DB {
 
         Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status MakeRoomForWirte(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        Status MakeRoomForWrite(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
         WriteBatch* BuildBatchGroup(Writer** last_writer) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         void RecordBackgroundError(const Status& s);

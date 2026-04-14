@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <deque>
+#include <pthread.h>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,6 +20,7 @@
 #include "../wal/log_reader.h"
 #include "../wal/log_writer.h"
 #include "memtable.h"
+#include "snapshot.h"
 #include "table_cache.h"
 #include "version_edit.h"
 #include "version_set.h"
@@ -1014,6 +1018,495 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     VersionSet::LevelSummaryStorage tmp;
     Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
     return status;
+}
+
+namespace  {
+
+// Package the necessary varibles for iter.
+// Ensuring iters are not destroyed during use and can be successfully destroyed after use.
+struct IterState {
+    port::Mutex* const mu;
+    Version* const version GUARDED_BY(mu);
+    MemTable* const mem GUARDED_BY(mu);
+    MemTable* const imm GUARDED_BY(mu);
+
+    IterState(port::Mutex* mutex, MemTable* mem, MemTable* imm, Version* version)
+        : mu(mutex), version(version), mem(mem), imm(imm) {}
+};
+
+static void CleanupIteratorState(void* arg1, void* arg2) {
+    IterState* state = reinterpret_cast<IterState*>(arg1);
+    state->mu->Lock();
+    state->mem->Unref();
+    if (state->imm != nullptr) state->imm->Unref();
+    state->version->Unref();
+    state->mu->Unlock();
+    delete state;
+}
+
+}
+
+Iterator* DBImpl::NewInternalIterator(const ReadOptions& options, SequenceNumber* latest_snapshot, uint32_t* seed) {
+    mutex_.Lock();
+    *latest_snapshot = versions_->LastSequence();
+
+    // Collect together all needed child iterators
+    std::vector<Iterator*> list;
+    list.push_back(mem_->NewIterator());
+    mem_->Ref();
+    if (imm_ != nullptr) {
+        list.push_back(imm_->NewIterator());
+        imm_->Ref();
+    }
+    versions_->current()->AddIterators(options, &list);
+    Iterator* internal_iter = NewMergingIterator(&internal_comparator_, &list[0], list.size());
+    versions_->current()->Ref();
+
+    IterState* cleanup = new IterState(&mutex_, mem_, imm_, versions_->current());
+    internal_iter->RegisterCleanup(CleanupIteratorState, cleanup, nullptr);
+
+    // Providee some randomness or offset
+    *seed = ++seed_;
+    mutex_.Unlock();
+    return internal_iter;
+}
+
+Iterator* DBImpl::TEST_NewInternalIterator() {
+    SequenceNumber ignored;
+    uint32_t ignored_seed;
+    return NewInternalIterator(ReadOptions(), &ignored, &ignored_seed);
+}
+
+int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
+    MutexLock l(&mutex_);
+    return versions_->MaxNextLevelOverlappingBytes();
+}
+
+Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::string* value) {
+    Status s;
+    MutexLock l(&mutex_);
+    SequenceNumber snapshot;
+    if (options.snapshot != nullptr) {
+        snapshot = static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
+    } else {
+        snapshot = versions_->LastSequence();
+    }
+
+    MemTable* mem = mem_;
+    MemTable* imm = imm_;
+    Version* current = versions_->current();
+    mem->Ref();
+    if (imm != nullptr) imm->Ref();
+    current->Ref();
+
+    bool have_stat_update = false;
+    Version::GetStats stats;
+
+    // Unlock while reading from files and memtables
+    {
+        mutex_.Unlock();
+        // First look in the memtable, then in the immutable memtable (if any).
+        LookupKey lkey(key, snapshot);
+        if (mem->Get(lkey, value, &s)) {
+            // Done
+        } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
+            // Done
+        } else {
+            s = current->Get(options, lkey, value, &stats);
+            have_stat_update = true;
+        }
+        mutex_.Lock();
+    }
+
+    if (have_stat_update && current->UpdateStats(stats)) {
+        MaybeScheduleCompaction();
+    }   
+    mem->Unref();
+    if (imm != nullptr) imm->Unref();
+    current->Unref();
+    return s;
+}
+
+Iterator* DBImpl::NewIterator(const ReadOptions& options) {
+    SequenceNumber latest_snapshot;
+    uint32_t seed;
+    Iterator* iter = NewInternalIterator(options, &latest_snapshot, &seed);
+    return NewDBIterator(this, user_comparator(), iter,
+                        (options.snapshot != nullptr 
+                        ? static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number() 
+                        : latest_snapshot), seed);
+}
+
+void DBImpl::RecordReadSample(Slice key) {
+    MutexLock l(&mutex_);
+    if (versions_->current()->RecordReadSample(key)) {
+        MaybeScheduleCompaction();
+    }
+}
+
+const Snapshot* DBImpl::GetSnapshot() {
+    MutexLock l(&mutex_);
+    return snapshots_.New(versions_->LastSequence());
+}
+
+void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
+    MutexLock l(&mutex_);
+    snapshots_.Delete(static_cast<const SnapshotImpl*>(snapshot));
+}
+
+Status DBImpl::Put(const WriteOptions& options, const Slice& key, const Slice& value) {
+    return DB::Put(options, key, value);
+}
+
+Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
+    return DB::Delete(options, key);
+}
+
+Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
+    Writer w(&mutex_);
+    w.batch = updates;
+    w.sync = options.sync;
+    w.done = false;
+
+    MutexLock l(&mutex_);
+    writers_.push_back(&w);
+    while (!w.done && &w != writers_.front()) {
+        w.cv.Wait();
+    }
+    if (w.done) {
+        return w.status;
+    }
+
+    // May temporarily unlock and wait
+    Status status = MakeRoomForWrite(updates == nullptr);
+    uint64_t last_sequence = versions_->LastSequence();
+    Writer* last_writer = &w;
+    if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
+        // The parameter is set to the last writer for m
+        WriteBatch* write_batch = BuildBatchGroup(&last_writer);
+        // Update the batch sequence to remove the deque after writing
+        WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
+        last_sequence += WriteBatchInternal::Count(write_batch);
+
+        // Add to log ang apply to memtable.
+        // We can ralease the lock during this phase.
+        // &w is current responsible for logging and protects against concurrent loggers 
+        // and concurrent writes into mem_.
+        {
+            mutex_.Unlock();
+            // Record to WAL file
+            status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
+            bool sync_error = false;
+            if (status.ok() && options.sync) {
+                status = logfile_->Sync();
+                if (!status.ok()) {
+                    sync_error = true;
+                }
+            }
+            if (status.ok()) {
+                // Actual write operation
+                status = WriteBatchInternal::InsertInto(write_batch, mem_);
+            }
+            mutex_.Lock();
+            if (sync_error) {
+                // The state of the log file is indeterminate.
+                // So we force the DB into a mode where all future writes fail.
+                RecordBackgroundError(status);
+            }
+        }
+        if (write_batch == tmp_batch_) tmp_batch_->Clear();
+
+        versions_->SetLastSequence(last_sequence);
+    }
+
+    // Reomve writer that have already finished writing
+    while (true) {
+        Writer* ready = writers_.front();
+        writers_.pop_front();
+        if (ready != &w) {
+            ready->status = status;
+            ready->done = true;
+            ready->cv.Signal();
+        }
+        if (ready == last_writer) break;
+    }
+
+    // Notify new head of write queue
+    if (!writers_.empty()) {
+        writers_.front()->cv.Signal();
+    }
+
+    return status;
+}
+
+WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
+    mutex_.AssertHeld();
+    assert(!writers_.empty());
+    Writer* first = writers_.front();
+    WriteBatch* result = first->batch;
+    assert(result != nullptr);
+
+    size_t size = WriteBatchInternal::ByteSize(first->batch);
+
+    // If the original write is smalll.
+    // Limit the growth so we do not slow down the samll write too much
+    size_t max_size = 1 << 20;
+    if (size <= (128 << 10)) {
+        max_size = size + (128 << 10);
+    }
+
+    *last_writer = first;
+    std::deque<Writer*>::iterator iter = writers_.begin();
+    ++iter;
+    for (; iter != writers_.end(); iter++) {
+        Writer* w = *iter;
+        if (w->sync && !first->sync) {
+            break;
+        }
+
+        if (w->batch != nullptr) {
+            size += WriteBatchInternal::ByteSize(w->batch);
+            if (size > max_size) {
+                break;
+            }
+
+            if (result == first->batch) {
+                result = tmp_batch_;
+                assert(WriteBatchInternal::Count(result) == 0);
+                WriteBatchInternal::Append(result, first->batch);
+            }
+            WriteBatchInternal::Append(result, w->batch);
+        }
+        *last_writer = w;
+    }
+    return result;
+}
+
+Status DBImpl::MakeRoomForWrite(bool force) {
+    mutex_.AssertHeld();
+    assert(!writers_.empty());
+    bool allow_delay = !force;
+    Status s;
+    while (true) {
+        if (!bg_error_.ok()) {
+            // Yield previous error
+            s = bg_error_;
+            break;
+        } else if (allow_delay && versions_->NumLevelFiles(0) >= config::kLO_SlowdownWritesTrigger) {
+            // We are getting close to hitting a hard limit on the number of
+            // L0 files.  Rather than delaying a single write by several
+            // seconds when we hit the hard limit, start delaying each
+            // individual write by 1ms to reduce latency variance.  Also,
+            // this delay hands over some CPU to the compaction thread in
+            // case it is sharing the same core as the writer.
+            // "Smooth long-tail latency"
+            mutex_.Unlock();
+            env_->SleepForMicroseconds(1000);
+            allow_delay = false;  // Make sure only one delay
+            mutex_.Lock();
+        } else if (!force && (mem_->ApproximateMemoeyUsage() <= options_.write_buffer_size)) {
+            // There is room in current memtable
+            break;
+        } else if (imm_ != nullptr) {
+            // We have filled up the current memtable.
+            // But the previous one is still being compacted, so we wait.
+            Log(options_.info_log, "Current memtable full; waiting...\n");
+            background_work_finished_signal_.Wait();
+        } else if (versions_->NumLevelFiles(0) >= config::kLO_SlowdownWritesTrigger) {
+            // There are too many level-0 files, waiting for file merging to decrease.
+            Log(options_.info_log, "Too many L0 files; waiting...\n");
+            background_work_finished_signal_.Wait();
+        } else {  // mem is fully, but no compaction is running
+            // Attempt to switch to a new memtable and trigger compaction of old
+            assert(versions_->PrevLogNumber() == 0);
+            uint64_t new_log_number = versions_->NewFileNumber();
+            WritableFile* lfile = nullptr;
+            s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);
+            if (!s.ok()) {
+                versions_->ReuseFileNumber(new_log_number);
+                break;
+            }
+
+            delete log_;
+
+            s = logfile_->Close();
+            if (!s.ok()) {
+                RecordBackgroundError(s);
+            }
+            delete logfile_;
+
+            logfile_ = lfile;
+            logfile_number_ = new_log_number;
+            log_ = new log::Writer(lfile);
+            imm_ = mem_;
+            has_imm_.store(true, std::memory_order_release);
+            mem_ = new MemTable(internal_comparator_);
+            mem_->Ref();
+            force = false;
+            MaybeScheduleCompaction();
+        }   
+    }
+    return s;
+}
+
+bool DBImpl::GetProperty(const Slice& property, std::string* value) {
+    value->clear();
+
+    MutexLock l(&mutex_);
+    Slice in = property;
+    Slice prefix("rocketdb.");
+    if (!in.starts_with(prefix)) return false;
+    in.remove_prefix(prefix.size());
+
+    if (in.starts_with("num-files-at-level")) {
+        in.remove_prefix(strlen("num-files-at-level"));
+        uint64_t level;
+        bool ok = ConsumeDecimalNumber(&in, &level) && in.empty();
+        if (!ok || level >= config::kNumLevels) {
+            return false;
+        } else {
+            char buf[100];
+            std::snprintf(buf, sizeof(buf), "%d", versions_->NumLevelFiles(static_cast<int>(level)));
+            *value = buf;
+            return true;
+        }
+    } else if (in == "stats") {
+        char buf[200];
+        std::snprintf(buf, sizeof(buf), "                               Compactions\n"
+                                                          "Level  Files Size(MB) Time(sec) Read(MB) Write(MB\n)"
+                                                          "-------------------------------------------------\n");
+        value->append(buf);
+        for (int level = 0; level < config::kNumLevels; level++) {
+            int files = versions_->NumLevelFiles(level);
+            if (stats_[level].micros > 0 || files > 0) {
+                std::snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f\n",
+                              level, files, versions_->NumLevelBytes(level) / 1048576.0,
+                              stats_[level].micros / 1e6,
+                              stats_[level].bytes_read / 1048576.0,
+                              stats_[level].bytes_written/ 1048576.0);
+                value->append(buf);
+            }
+        }
+        return true;
+    } else if (in == "sstables") {
+        *value = versions_->current()->DebugString();
+    } else if (in == "approximate-memory-usage") {
+        size_t total_usage = options_.block_cache->TotalCharge();
+        if (mem_) {
+            total_usage += mem_->ApproximateMemoeyUsage();
+        }
+        if (imm_) {
+            total_usage += imm_->ApproximateMemoeyUsage();
+        }
+        char buf[50];
+        std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(total_usage));
+        value->append(buf);
+        return true;
+    }
+
+    return false;
+}
+
+void DBImpl::GetApproximateSizes(const Range* range, int n, uint64_t* sizes) {
+    MutexLock l(&mutex_);
+    Version* v = versions_->current();
+    v->Ref();
+
+    for (int i = 0; i < n; i++) {
+        // Convert user_key into a corresponding internal key
+        InternalKey k1(range[i].start, kMaxSequenceNumber, kValueTypeForSeek);
+        InternalKey k2(range[i].limit, kMaxSequenceNumber, kValueTypeForSeek);
+        uint64_t start = versions_->ApproximateOffsetOf(v, k1);
+        uint64_t limit = versions_->ApproximateOffsetOf(v, k2);
+        sizes[i] = (limit > start) ? limit - start : 0;
+    }
+
+    v->Unref();
+}
+
+Status DB::Put(const WriteOptions& opt, const Slice& key, const Slice& value) {
+    WriteBatch batch;
+    batch.Put(key, value);
+    return Write(opt, &batch);
+}
+
+Status DB::Delete(const WriteOptions& opt, const Slice& key) {
+    WriteBatch batch;
+    batch.Delete(key);
+    return Write(opt, &batch);
+}
+
+DB::~DB() = default;
+
+Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
+    *dbptr = nullptr;
+
+    DBImpl* impl = new DBImpl(options, dbname);
+    impl->mutex_.Lock();
+    VersionEdit edit;
+    bool save_manifest = false;
+    Status s = impl->Recover(&edit, &save_manifest);
+    if (s.ok() && impl->mem_ == nullptr) {
+        uint64_t new_log_number = impl->versions_->NewFileNumber();
+        WritableFile* lfile;
+        s = options.env->NewWritableFile(LogFileName(dbname, new_log_number), &lfile);
+        if (s.ok()) {
+            edit.SetLogNumber(new_log_number);
+            impl->logfile_ = lfile;
+            impl->logfile_number_ = new_log_number;
+            impl->log_ = new log::Writer(lfile);
+            impl->mem_ = new MemTable(impl->internal_comparator_);
+            impl->mem_->Ref();
+        }
+    }
+    if (s.ok() && save_manifest) {
+        edit.SetPrevLogNumber(0);
+        edit.SetLogNumber(impl->logfile_number_);
+        s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
+    }
+    if (s.ok()) {
+        impl->RemoveObsoleteFiles();
+        impl->MaybeScheduleCompaction();
+    }
+    impl->mutex_.Unlock();
+    if (s.ok()) {
+        assert(impl->mem_ != nullptr );
+        *dbptr = impl;
+    } else {
+        delete impl;
+    }
+    return s;
+}
+
+Snapshot::~Snapshot() = default;
+
+Status DestroyDB(const std::string& dbname, const Options& options) {
+    Env* env = options.env;
+    std::vector<std::string> filenames;
+    Status result = env->GetChildren(dbname, &filenames);
+    if (!result.ok()) {
+        return Status::OK();
+    }
+
+    FileLock* lock;
+    const std::string lockname = LockFileName(dbname);
+    result = env->LockFile(lockname, &lock);
+    if (result.ok()) {
+        uint64_t number;
+        FileType type;
+        for (size_t i = 0; i < filenames.size(); i++) {
+            if (ParseFileName(filenames[i], &number, &type) && type != kDBLockFile) {
+                Status del = env->RemoveFile(dbname + "/" + filenames[i]);
+                if (result.ok() && !del.ok()) {
+                    result = del;
+                }
+            }
+        }
+        env->UnlockFile(lock);
+        env->RemoveFile(lockname);
+        env->RemoveDir(dbname);
+    }
+    return result;
 }
 
 }

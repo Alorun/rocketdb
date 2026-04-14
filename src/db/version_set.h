@@ -35,6 +35,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp, bool disjoint_sort
 
 class Version {
     public:
+        // Record of invalid query file
         struct GetStats {
             FileMetaData* seek_file;
             int seek_file_level;
