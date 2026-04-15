@@ -13,6 +13,7 @@
 #include "filter_block.h"
 #include "../util/coding.h"
 #include "../util/crc32c.h"
+#include "../port/port_stdcxx.h"
 
 namespace rocketdb {
 
@@ -145,12 +146,26 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
             break;
         
         case kSnappyCompression: {
-           
+            std::string* compressed = &r->compressed_output;
+            if (port::Snappy_Compress(raw.data(), raw.size(), compressed) && 
+                compressed->size() < raw.size() - (raw.size() / 8u)) {
+                    block_contents = *compressed;
+            } else {
+                block_contents = raw;
+                type = kNoCompression;
+            }
             break;
         }
 
         case kZstdCompression: {
-
+            std::string* compressed = &r->compressed_output;
+            if (port::Zstd_Compress(r->options.zstd_compression_level, raw.data(), raw.size(), compressed) &&
+                compressed->size() < raw.size() - (raw.size() / 8u)) {
+                    block_contents = *compressed;
+            } else {
+                block_contents = raw;
+                type = kNoCompression;
+            }
             break;
         }
     }
@@ -231,6 +246,12 @@ Status TableBuilder::Finish() {
         }
     }
     return r->status;
+}
+
+void TableBuilder::Abandon() {
+    Rep* r = rep_;
+    assert(!r->closed);
+    r->closed = true;
 }
 
 uint64_t TableBuilder::NumEntries() const { return rep_->num_entries; }

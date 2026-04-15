@@ -356,7 +356,8 @@ class SharedLRUCache : public Cache {
         uint64_t last_id_;
 };
 
-
 }
+
+Cache* NewLRUCache(size_t capacity) { return new SharedLRUCache(capacity); }
 
 }

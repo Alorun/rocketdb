@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/db_test.dir/link.d CMakeFiles/db_test.dir/main.cc.o -o db_test  librocketdb.a -lpthread

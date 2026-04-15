@@ -13,7 +13,7 @@ public:
         static_assert(sizeof(instance_storage_) >= sizeof(InstanceType), 
                       "instance_storage_ is not large enough to hold the instance");
         static_assert(std::is_standard_layout_v<NoDestructor<InstanceType>>);
-        static_assert(offsetof(NoDestructor, instance_storage) % alignof(InstanceType) == 0,
+        static_assert(offsetof(NoDestructor, instance_storage_) % alignof(InstanceType) == 0,
                      "instance_storage_ does not meet the instance's slignment requirement");
         static_assert(alignof(NoDestructor<InstanceType>) % alignof(InstanceType) == 0,
                      "instance_storage_ does not meet the instance's slignment requirement");

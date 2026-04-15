@@ -873,7 +873,7 @@ Status VersionSet::Recover(bool* save_manifest) {
             }
 
             if (edit.has_next_file_number_) {
-                next_file_number_ = edit.next_file_number_;
+                next_file = edit.next_file_number_;
                 have_next_file = true;
             }
 
@@ -1338,6 +1338,18 @@ Compaction* VersionSet::CompactRange(int level, const InternalKey* begin, const 
     c->inputs_[0] = inputs;
     SetupOtherInputs(c);
     return c;
+}
+
+Compaction::Compaction(const Options* options, int level)
+        : level_(level),
+          max_output_file_size_(MaxFileSizeForLevel(options, level)),
+          input_version_(nullptr),
+          grandparent_index_(0),
+          seen_key_(false),
+          overlapped_bytes_(0) {
+    for (int level = 0; level < config::kNumLevels; level++) {
+        level_ptrs_[level] = 0;
+    }
 }
 
 Compaction::~Compaction() {

@@ -1,0 +1,4 @@
+/home/hahaha/work/rocketdb/build/CMakeFiles/rocketdb.dir
+/home/hahaha/work/rocketdb/build/CMakeFiles/db_test.dir
+/home/hahaha/work/rocketdb/build/CMakeFiles/edit_cache.dir
+/home/hahaha/work/rocketdb/build/CMakeFiles/rebuild_cache.dir

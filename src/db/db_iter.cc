@@ -110,6 +110,25 @@ class DBIter : public Iterator {
         size_t bytes_until_read_sampling_;
 };
 
+inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
+    Slice k = iter_->key();
+
+    size_t bytes_read = k.size() + iter_->value().size();
+    while (bytes_until_read_sampling_ < bytes_read) {
+        bytes_until_read_sampling_ += RandomCompactionPeriod();
+        db_->RecordReadSample(k);
+    }
+    assert(bytes_until_read_sampling_ >= bytes_read);
+    bytes_until_read_sampling_ -= bytes_read;
+
+    if (!ParseInternalKey(k, ikey)) {
+        status_ = Status::Corruption("corrupted internal key in DBIter");
+        return false;
+    } else {
+        return true;
+    }
+}
+
 void DBIter::Next() {
     assert(valid_);
     

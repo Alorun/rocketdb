@@ -2,6 +2,7 @@
 
 #include "dbformat.h"
 #include "../../include/iterator.h"
+#include "skiplist.h"
 
 #include <cassert>
 #include <cstddef>

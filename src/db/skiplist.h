@@ -6,6 +6,7 @@
 
 #include "../util/arena.h"
 #include "../util/random.h"
+#include "dbformat.h"
 
 namespace rocketdb {
 
@@ -155,6 +156,11 @@ inline void SkipList<Key, Comparator>::Iterator::Prev() {
     if (node_ == list_->head_) {
         node_ = nullptr;
     }
+}
+
+template <typename Key, class Comparator>
+inline void SkipList<Key, Comparator>::Iterator::Seek(const Key& target) {
+    node_ = list_->FindGreaterOrEqual(target, nullptr);
 }
 
 template <typename Key, class Comparator>
