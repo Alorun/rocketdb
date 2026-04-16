@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <iostream>
 
 #include "builder.h"
 #include "db_iter.h"
@@ -106,7 +107,7 @@ Options SanitizeOptions(const std::string& dbname, const InternalKeyComparator* 
         src.env->CreateDir(dbname);
         src.env->RenameFile(InfoLogFileName(dbname), OldInfoLogFileName(dbname));
         Status s = src.env->NewLogger(InfoLogFileName(dbname), &result.info_log);
-        if (s.ok()) {
+        if (!s.ok()) {
             result.info_log = nullptr;
         }
     }
@@ -145,6 +146,11 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
 
 DBImpl::~DBImpl() {
     // Waiting for background work to finish
+
+    std::cout << "========= DBImpl Destructor is called! =========" << std::endl;
+    std::cout << "owns_info_log_: " << owns_info_log_ << std::endl;
+    std::cout << "options_.info_log addr: " << options_.info_log << std::endl;
+
     mutex_.Lock();
     shutting_down_.store(true, std::memory_order_release);
     while (background_compaction_scheduled_) {
@@ -406,7 +412,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
     WriteBatch batch;
     int compactions = 0;
     MemTable* mem = nullptr;
-    while (reader.ReaderRecord(&record, &scratch) && status.ok()) {
+    while (reader.ReadRecord(&record, &scratch) && status.ok()) {
         if (record.size() < 12) {
             reporter.Corruption(record.size(), Status::Corruption("log record too small"));
             continue;

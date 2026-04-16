@@ -49,7 +49,7 @@ bool Reader::SkipToInitialBlock() {
 }
 
 // scratch : external input reduces memory allocation frequency
-bool Reader::ReaderRecord(Slice* record, std::string* scratch) {
+bool Reader::ReadRecord(Slice* record, std::string* scratch) {
     if (last_record_offset_ < initial_offset_) {
         if (!SkipToInitialBlock()) {
             return false;

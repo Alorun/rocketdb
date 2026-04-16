@@ -64,7 +64,7 @@ class DB {
         virtual void CompactRange(const Slice* begin, const Slice* end) = 0;
 };
 
-Status DestroyDN(const std::string& name, const Options& options);
+Status DestroyDB(const std::string& name, const Options& options);
 
 Status RepairDB(const std::string& dbname, const Options& options);
 

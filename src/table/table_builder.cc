@@ -184,7 +184,7 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents, CompressionType ty
         trailer[0] = type;
         uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
         crc = crc32c::Extend(crc, trailer, 1);
-        EncodeVarint32(trailer + 1, crc32c::Mask(crc));
+        EncodeFixed32(trailer + 1, crc32c::Mask(crc));
         r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
         if (r->status.ok()) {
             r->offset += block_contents.size() + kBlockTrailerSize;

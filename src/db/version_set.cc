@@ -69,6 +69,7 @@ Version::~Version() {
         for (size_t i = 0; i < files_[level].size(); i++) {
             FileMetaData* f = files_[level][i];
             assert(f->refs > 0);
+            f->refs--;
             if (f->refs <= 0) {
                 delete f;
             }
@@ -457,7 +458,7 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key, const Sl
 }
 
 void Version::GetOverlappingInputs(int level, const InternalKey* begin, const InternalKey* end, std::vector<FileMetaData*>* inputs) {
-    assert(level > 0);
+    assert(level >= 0);
     assert(level < config::kNumLevels);
     inputs->clear();
     Slice user_begin, user_end;
@@ -537,7 +538,7 @@ class VersionSet::Builder {
                 const FileSet* added = level_[level].added_files;
                 std::vector<FileMetaData*> to_unref;
                 to_unref.reserve(added->size());
-                for (FileSet::const_iterator it = added->begin(); it != added->end(); ++it) {
+                for (FileSet::const_iterator it = added->begin(); it != added->end(); it++) {
                     to_unref.push_back(*it);
                 }
                 delete added;
@@ -697,7 +698,12 @@ VersionSet::VersionSet(const std::string& dbname, const Options* options, TableC
 }
 
 VersionSet::~VersionSet() {
-    current_->Unref();
+    // current_->Unref();
+
+    if (current_ != nullptr) {
+        current_->Unref(); 
+    }
+
     assert(dummy_versions_.next_ == &dummy_versions_);
     delete descriptor_log_;
     delete descriptor_file_;
@@ -847,7 +853,7 @@ Status VersionSet::Recover(bool* save_manifest) {
         log::Reader reader(file, &reporter, true, 0);
         Slice record;
         std::string scratch;
-        while (reader.ReaderRecord(&record, &scratch)) {
+        while (reader.ReadRecord(&record, &scratch)) {
             ++read_records;
             VersionEdit edit;
             s = edit.DecodeFrom(record);

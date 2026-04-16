@@ -36,7 +36,7 @@ class Reader {
         // Read the next record into record
         // Return true if read successfully, false if we hit end of the input
         // May use scratch when the contents sliced
-        bool ReaderRecord(Slice* record, std::string* scratch);
+        bool ReadRecord(Slice* record, std::string* scratch);
 
         // Return the physical offset of the last record returned by ReadRecord
         uint64_t LastRecordOffset();
@@ -52,7 +52,7 @@ class Reader {
         // Skip all blocks that are completely before "initial_offset_"
         bool SkipToInitialBlock();
 
-        // Read real data and examine for ReaderRecord
+        // Read real data and examine for ReadRecord
         unsigned int ReadPhysicalRecord(Slice* result);
 
         // Reports dropped bytes to the reporter
