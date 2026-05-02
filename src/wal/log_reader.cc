@@ -186,6 +186,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
         }
 
         const char* header = buffer_.data();
+        // Perform bit masking operations, get raw bytes
         const uint32_t a = static_cast<uint32_t>(header[4] & 0xff);
         const uint32_t b = static_cast<uint32_t>(header[5] & 0xff);
         const unsigned int type = header[6];

@@ -9,14 +9,15 @@
 namespace rocketdb {
 
 // WriteBatch::rep_ :=
-//    sequence: fixed64
-//    count: fixed32
+//    sequence: fixed64 (8 bytes)
+//    count: fixed32 (4 bytes)
 //    data: record[count]
 
 // record := kTypeValue varstring varstring | kTypeDeletion varstring
 // varstring := len: varint32 + data: uint8[len]
 
-static const size_t  kHeader = 12;
+// WriteBatch Header = sequence: fixed64 (8 bytes) + count: fixed32 (4 bytes) = 12 bytes
+static const size_t kHeader = 12;
 
 WriteBatch::WriteBatch() { Clear(); }
 

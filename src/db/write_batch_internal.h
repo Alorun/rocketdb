@@ -9,7 +9,7 @@ namespace rocketdb {
 class MemTable;
 
 // WriteBatchInternal provides static methods for manipulating a
-// WriteBatch that we don't want in the public WriteBatch interface.
+// writeBatch that we don't want in the public WriteBatch interface.
 class WriteBatchInternal {
     public:
         // Return the number of entries in the batch (9 ~ 12 bytes)

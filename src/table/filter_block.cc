@@ -13,7 +13,7 @@ namespace rocketdb {
 static const size_t kFilterBaseLg = 11;
 static const size_t kFilterBase = 1 << kFilterBaseLg;
 
-FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy) : policy_(policy) {}\
+FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy) : policy_(policy) {}
 
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
     uint64_t filter_index = (block_offset / kFilterBase);

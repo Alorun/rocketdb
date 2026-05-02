@@ -35,7 +35,7 @@ class Writer {
         WritableFile* dest_;
         int block_offset_;  // Current offset in block
 
-        // Crc32c values for all supported record types
+        // Crc32c values for all supported record types(cache).
         // These are pre-computed to reduce the overhead of computing the crc of the record type
         uint32_t type_crc_[kMaxRecordType + 1];
 };

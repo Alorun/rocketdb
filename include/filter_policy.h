@@ -13,7 +13,7 @@ class FilterPolicy {
         // Return the name of the policy
         virtual const char* Name() const = 0;
 
-        // Keys should are ordered according to the user supplied comparator
+        // Keys should are ordered according to the user supplied comparator.
         // Append a filter that summarizes keys[0, n-1] to *dst
         virtual void CreateFilter(const Slice* key, int n, std::string* dst) const = 0;
 
