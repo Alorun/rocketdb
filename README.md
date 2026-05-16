@@ -1,23 +1,26 @@
-# rocketdb
+# RocketDB
 
-### 项目简介
+### Project Introduction
 
-rocketdb 是一个基于 LSM-Tree 思路的本地键值数据库实现，整体结构参考 LevelDB。它支持基础的 Put、Get、
-Delete、批量写入、迭代器、快照、范围压缩、数据库修复与销毁等接口。核心写入路径由 WAL 日志和 MemTable 组
-成，数据最终刷写为 SSTable 文件，并通过 MANIFEST / VersionSet 管理多层文件版本与后台 Compaction。
+RocketDB is a local key-value database implementation based on the LSM-Tree approach, with an overall structure similar to LevelDB. It supports basic Put, Get, Delete, batch writes, iterators, snapshots, range compression, database repair, and destruction interfaces. The core write path consists of a WAL log and a MemTable. Data is ultimately flushed to SSTable files, and multi-level file versions and background compaction are managed through MANIFEST/VersionSet.
 
-### 主要模块
+### Main Modules
 
-- 公共 API：include/db.h:35、include/options.h:22
-- 数据库核心：src/db/db_impl.cc:124，包含打开、恢复、读写、MemTable flush、后台 compaction
-- 版本管理：src/db/version_set.cc:728，管理 MANIFEST、SST 文件层级和 compaction 选择
-- 表文件/SSTable：src/table/table_builder.cc:1、src/table/table.cc:1
-- WAL 日志：src/wal/log_writer.cc:1、src/wal/log_reader.cc:1
-- 工具层：缓存、编码、CRC、Bloom filter、Env POSIX 等在 src/util
+- Public API: include/db.h:35, include/options.h:22
 
-### 构建与示例
+- Database Core: src/db/db_impl.cc:124, includes open, restore, read/write, MemTable flush, background compaction
 
-CMakeLists.txt:1 会编译静态库 rocketdb，并构建一个简单交互程序 db_test。入口在 main.cc:1，支持命令：
+- Version Management: src/db/version_set.cc:728, manages MANIFEST, SST file levels, and compaction selection
+
+- Table Files/SSTable: src/table/table_builder.cc:1, src/table/table.cc:1
+
+- WAL Log: src/wal/log_writer.cc:1, src/wal/log_reader.cc:1
+
+- Utility Layer: Caching, encoding, CRC, Bloom filter, Env POSIX, etc., are in src/util
+
+### Build and Examples
+
+CMakeLists.txt:1 will compile the static library rocketdb and build a simple interactive program db_test. The entry point is in main.cc:1, and the supported commands are:
 
 put k1 v1
 get k1
