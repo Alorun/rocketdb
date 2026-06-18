@@ -1,8 +1,25 @@
-cmake_minimum_required(VERSION 3.10)
-project(MiniLevelDB)
+cmake_minimum_required(VERSION 3.13)
+project(MiniRocketDB)
 
 # 开启 C++17 标准 (RocketDB 依赖)
 set(CMAKE_CXX_STANDARD 17)
+
+# ---------------------------------------------------------------------------
+# Sanitizer 开关：默认 OFF，产出干净库（供 cgo 链接）。
+# 仅当显式 -DROCKETDB_ENABLE_ASAN=ON 时才追加 AddressSanitizer，
+# 且编译与链接两侧都加，避免“编了带 asan、链却不带”的错配。
+# ---------------------------------------------------------------------------
+option(ROCKETDB_ENABLE_ASAN "Build RocketDB with AddressSanitizer (debug only)" OFF)
+
+if(ROCKETDB_ENABLE_ASAN)
+    message(STATUS "RocketDB: AddressSanitizer ENABLED (debug build)")
+    add_compile_options(-fsanitize=address -g)
+    add_link_options(-fsanitize=address)
+else()
+    # 默认干净 release 构建：-O2，绝不包含任何 sanitizer flag
+    message(STATUS "RocketDB: clean release build (-O2, no sanitizer)")
+    add_compile_options(-O2)
+endif()
 
 # 头文件搜索路径
 include_directories(include src)
