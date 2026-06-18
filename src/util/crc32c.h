@@ -33,5 +33,5 @@ inline uint32_t Unmask(uint32_t masked_crc) {
 }
 
 }  // namespace crc32c
-}  // namespace leveldb
+}  // namespace rocketdb
 

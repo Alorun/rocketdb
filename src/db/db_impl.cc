@@ -311,7 +311,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool *save_manifest) {
             return Status::InvalidArgument(dbname_, "dose not exist (create_if_missing is false)");
         }
     } else {
-        if (options_.error_if_exits) {
+        if (options_.error_if_exists) {
             return Status::InvalidArgument(dbname_, "exists (error_if_exists is true)");
         }
     }

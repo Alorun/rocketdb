@@ -18,5 +18,5 @@ class EnvPosixTestHelper {
   static void SetReadOnlyMMapLimit(int limit);
 };
 
-}  // namespace leveldb
+}  // namespace rocketdb
 

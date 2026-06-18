@@ -1,12 +1,12 @@
 #pragma once
 // port/port_config.h availability is automatically detected via __has_include
-// in newer compilers. If LEVELDB_HAS_PORT_CONFIG_H is defined, it overrides the
+// in newer compilers. If ROCKETDB_HAS_PORT_CONFIG_H is defined, it overrides the
 // configuration detection.
-#if defined(LEVELDB_HAS_PORT_CONFIG_H)
+#if defined(ROCKETDB_HAS_PORT_CONFIG_H)
 
-#if LEVELDB_HAS_PORT_CONFIG_H
+#if ROCKETDB_HAS_PORT_CONFIG_H
 #include "port/port_config.h"
-#endif  // LEVELDB_HAS_PORT_CONFIG_H
+#endif  // ROCKETDB_HAS_PORT_CONFIG_H
 
 #elif defined(__has_include)
 
@@ -14,7 +14,7 @@
 #include "port/port_config.h"
 #endif  // __has_include("port/port_config.h")
 
-#endif  // defined(LEVELDB_HAS_PORT_CONFIG_H)
+#endif  // defined(ROCKETDB_HAS_PORT_CONFIG_H)
 
 #if HAVE_CRC32C
 #include <crc32c/crc32c.h>
@@ -212,5 +212,5 @@ inline uint32_t AcceleratedCRC32C(uint32_t crc, const char* buf, size_t size) {
 }
 
 }  // namespace port
-}  // namespace leveldb
+}  // namespace rocketdb
 

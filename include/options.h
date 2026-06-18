@@ -31,7 +31,7 @@ struct Options {
     bool create_if_missing = false;
 
     // If true, an error is raised if the database already exists
-    bool error_if_exits = false;
+    bool error_if_exists = false;
 
     // If true, the implementation will do aggressive checking of the data
     // that it is processing and will stop early if it detects any errors

@@ -61,7 +61,7 @@ class Repairer {
                     bytes += tables_[i].meta.file_size;
                 }
                 Log(options_.info_log, 
-                    "**** Repaired leveldb %s; "
+                    "**** Repaired rocketdb %s; "
                     "recovered %d files; %llu bytes. "
                     "Some data may have been lost. "
                     "****",

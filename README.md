@@ -2,7 +2,7 @@
 
 ### Project Introduction
 
-RocketDB is a local key-value database implementation based on the LSM-Tree approach, with an overall structure similar to LevelDB. It supports basic Put, Get, Delete, batch writes, iterators, snapshots, range compression, database repair, and destruction interfaces. The core write path consists of a WAL log and a MemTable. Data is ultimately flushed to SSTable files, and multi-level file versions and background compaction are managed through MANIFEST/VersionSet.
+RocketDB is a local key-value database implementation based on the LSM-Tree approach, with an overall structure similar to RocketDB. It supports basic Put, Get, Delete, batch writes, iterators, snapshots, range compression, database repair, and destruction interfaces. The core write path consists of a WAL log and a MemTable. Data is ultimately flushed to SSTable files, and multi-level file versions and background compaction are managed through MANIFEST/VersionSet.
 
 ### Main Modules
 

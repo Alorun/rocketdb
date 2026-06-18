@@ -1,7 +1,3 @@
-// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file. See the AUTHORS file for names of contributors.
-//
 // This file contains the specification, but not the implementations,
 // of the types/operations/etc. that should be defined by a platform
 // specific port_<platform>.h file.  Use this file as a reference for
@@ -118,4 +114,4 @@ bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg);
 uint32_t AcceleratedCRC32C(uint32_t crc, const char* buf, size_t size);
 
 }  // namespace port
-}  // namespace leveldb
+}  // namespace rocketdb

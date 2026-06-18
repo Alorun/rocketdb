@@ -35,7 +35,7 @@ bool HandleDumpCommand(Env* env, char** files, int num) {
 }
 
 static void Usage() {
-    std::fprintf(stderr, "Usage: leveldbuild command...\n"
+    std::fprintf(stderr, "Usage: rocketdbuild command...\n"
                 "   dump files...       -- dump contents of specified files\n");
 }
 
