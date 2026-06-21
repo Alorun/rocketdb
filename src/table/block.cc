@@ -28,7 +28,7 @@ Block::Block(const BlockContents& contents) : data_(contents.data.data()),
         if (NumRestarts() > max_restarts_allowed) {
             size_ = 0;
         } else {
-            restart_offset_ = size_ - (1 + NumRestarts() * sizeof(uint32_t));
+            restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
         }
     }
 }
@@ -191,7 +191,7 @@ class Block::Iter : public Iterator {
             restart_index_ = index;
 
             uint32_t offset = GetRestartPoint(index);
-            value_ = Slice(data_ + offset);
+            value_ = Slice(data_ + offset, 0);
         }
 
         void CorruptionError() {

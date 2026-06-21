@@ -429,7 +429,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
             break;
         }
         const SequenceNumber last_seq = WriteBatchInternal::Sequence(&batch) + WriteBatchInternal::Count(&batch) - 1;
-        if (last_log > *max_sequence) {
+        if (last_seq > *max_sequence) {
             *max_sequence = last_seq;
         }
 

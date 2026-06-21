@@ -1360,6 +1360,7 @@ Compaction::Compaction(const Options* options, int level)
 
 Compaction::~Compaction() {
     if (input_version_ != nullptr) {
+        input_version_->Unref();
     }
 }
 

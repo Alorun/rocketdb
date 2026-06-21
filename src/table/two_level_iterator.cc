@@ -102,7 +102,7 @@ void TwoLevelIterator::Prev() {
 }
 
 void TwoLevelIterator::SetDataIterator(Iterator* data_iter) {
-    if (data_iter_.iter() != nullptr) SaveError(data_iter->status());
+    if (data_iter_.iter() != nullptr) SaveError(data_iter_.status());
     data_iter_.Set(data_iter);
 }
 
