@@ -230,7 +230,7 @@ void DBIter::FindPrevUserEntry() {
         do {
             ParsedInternalKey ikey;
             if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
-                if ((value_type != kTypeDeletion) && user_comparator_->Compare(ikey.user_key, saved_value_) < 0) {
+                if ((value_type != kTypeDeletion) && user_comparator_->Compare(ikey.user_key, saved_key_) < 0) {
                     // We encountered a non_deleted value in entries for previous keys.
                     break;
                 }

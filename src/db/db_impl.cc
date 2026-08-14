@@ -99,7 +99,7 @@ Options SanitizeOptions(const std::string& dbname, const InternalKeyComparator* 
     Options result = src;
     result.comparator = icmp;
     result.filter_policy = (src.filter_policy != nullptr) ? ipolicy : nullptr;
-    ClipToRange(&result.max_file_size, 64 + kNumNonTableCacheFiles, 50000);
+    ClipToRange(&result.max_open_files, 64 + kNumNonTableCacheFiles, 50000);
     ClipToRange(&result.write_buffer_size, 64 << 10, 1 << 30);
     ClipToRange(&result.max_file_size, 1 << 20, 1 << 30);
     ClipToRange(&result.block_size, 1 << 10, 4 << 20);
@@ -146,11 +146,6 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
 
 DBImpl::~DBImpl() {
     // Waiting for background work to finish
-
-    std::cout << "========= DBImpl Destructor is called! =========" << std::endl;
-    std::cout << "owns_info_log_: " << owns_info_log_ << std::endl;
-    std::cout << "options_.info_log addr: " << options_.info_log << std::endl;
-
     mutex_.Lock();
     shutting_down_.store(true, std::memory_order_release);
     while (background_compaction_scheduled_) {
@@ -652,7 +647,7 @@ void DBImpl::MaybeScheduleCompaction() {
         // DB is being deleted; no more background compactions
     } else if (!bg_error_.ok()) {
         // Already got an error; no more changes
-    } else if (imm_ != nullptr && manual_compaction_ == nullptr && !versions_->NeedsCompaction()) {
+    } else if (imm_ == nullptr && manual_compaction_ == nullptr && !versions_->NeedsCompaction()) {
         // No work to be done
     } else {
         background_compaction_scheduled_ = true;

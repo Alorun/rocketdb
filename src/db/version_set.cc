@@ -884,7 +884,7 @@ Status VersionSet::Recover(bool* save_manifest) {
             }
 
             if (edit.has_last_sequence_) {
-                last_sequence_ = edit.last_sequence_;
+                last_sequence = edit.last_sequence_;
                 have_last_sequence = true;
             }
         }
@@ -917,7 +917,7 @@ Status VersionSet::Recover(bool* save_manifest) {
         manifest_file_number_ = next_file;
         next_file_number_ = next_file + 1;
         last_sequence_ = last_sequence;
-        log_number = log_number;
+        log_number_ = log_number;
         prev_log_number_ = prev_log_number;
 
         if (ReuseManifest(dsname, current)) {
@@ -1310,7 +1310,7 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
     // Compute the set of grandparent files that overlop this compction.
     // Prevet merged files from becoming too large
     if (level + 2 < config::kNumLevels) {
-        current_->GetOverlappingInputs(level + 1, &all_start, &all_limit, &c->grandparents_);
+        current_->GetOverlappingInputs(level + 2, &all_start, &all_limit, &c->grandparents_);
     }
 
     compact_pointer_[level] = largest.Encode().ToString();

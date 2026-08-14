@@ -40,7 +40,7 @@ class BloomFilterPolicy : public FilterPolicy {
                 // Use double-hashing to generate a sequence of hash values.
                 uint32_t h = BloomHash(keys[i]);
                 const uint32_t delta = (h >> 17) | (h << 15);
-                for (size_t j = 0; i < k_; j++) {
+                for (size_t j = 0; j < k_; j++) {
                     const uint32_t bitpos = h % bits;
                     array[bitpos / 8] |= (1 << (bitpos % 8));
                     h += delta;
