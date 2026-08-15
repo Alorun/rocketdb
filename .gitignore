@@ -2,3 +2,4 @@ build/
 build-release/
 build-asan/
 build-test/
+build-test-asan/

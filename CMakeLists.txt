@@ -1,42 +1,74 @@
 cmake_minimum_required(VERSION 3.13)
 project(MiniRocketDB)
 
-# 开启 C++17 标准 (RocketDB 依赖)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# ---------------------------------------------------------------------------
-# Sanitizer 开关：默认 OFF，产出干净库（供 cgo 链接）。
-# 仅当显式 -DROCKETDB_ENABLE_ASAN=ON 时才追加 AddressSanitizer，
-# 且编译与链接两侧都加，避免“编了带 asan、链却不带”的错配。
-# ---------------------------------------------------------------------------
+# AddressSanitizer is opt-in so the default static library remains suitable
+# for normal consumers, including cgo callers.
 option(ROCKETDB_ENABLE_ASAN "Build RocketDB with AddressSanitizer (debug only)" OFF)
+
+# Keep the production library separate from command-line tools.  In
+# particular, src/db/levelbuild.cc defines its own main() and must not become
+# part of librocketdb.a.
+set(ROCKETDB_SOURCES
+    src/db/builder.cc
+    src/db/c.cc
+    src/db/db_impl.cc
+    src/db/db_iter.cc
+    src/db/dbformat.cc
+    src/db/dumpfile.cc
+    src/db/filename.cc
+    src/db/memtable.cc
+    src/db/repair.cc
+    src/db/table_cache.cc
+    src/db/version_edit.cc
+    src/db/version_set.cc
+    src/db/write_batch.cc
+    src/table/block.cc
+    src/table/block_builder.cc
+    src/table/filter_block.cc
+    src/table/format.cc
+    src/table/iterator.cc
+    src/table/merger.cc
+    src/table/table.cc
+    src/table/table_builder.cc
+    src/table/two_level_iterator.cc
+    src/util/arena.cc
+    src/util/bloom.cc
+    src/util/cache.cc
+    src/util/coding.cc
+    src/util/comparator.cc
+    src/util/crc32c.cc
+    src/util/env.cc
+    src/util/env_posix.cc
+    src/util/filter_policy.cc
+    src/util/hash.cc
+    src/util/histogram.cc
+    src/util/logging.cc
+    src/util/options.cc
+    src/util/status.cc
+    src/wal/log_reader.cc
+    src/wal/log_writer.cc
+)
+
+add_library(rocketdb STATIC ${ROCKETDB_SOURCES})
+target_compile_features(rocketdb PUBLIC cxx_std_17)
+target_include_directories(rocketdb
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+find_package(Threads REQUIRED)
+target_link_libraries(rocketdb PUBLIC Threads::Threads)
 
 if(ROCKETDB_ENABLE_ASAN)
     message(STATUS "RocketDB: AddressSanitizer ENABLED (debug build)")
-    add_compile_options(-fsanitize=address -g)
-    add_link_options(-fsanitize=address)
+    target_compile_options(rocketdb PRIVATE -fsanitize=address -g)
+    # rocketdb is static, so consumers must link the sanitizer runtime too.
+    target_link_options(rocketdb INTERFACE -fsanitize=address)
 else()
-    # 默认干净 release 构建：-O2，绝不包含任何 sanitizer flag
     message(STATUS "RocketDB: clean release build (-O2, no sanitizer)")
-    add_compile_options(-O2)
-endif()
-
-# 头文件搜索路径
-include_directories(include src)
-
-# 收集 src 目录下所有的 .cc 文件
-file(GLOB_RECURSE SOURCES "src/**/*.cc")
-
-# 1. 编译核心静态库
-add_library(rocketdb STATIC ${SOURCES})
-# posix 环境依赖多线程库
-target_link_libraries(rocketdb pthread)
-
-# 2. 编译示例入口程序（当前仓库若未提供 main.cc，则仅构建库和测试）
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cc")
-    add_executable(db_test main.cc)
-    target_link_libraries(db_test rocketdb)
+    target_compile_options(rocketdb PRIVATE -O2)
 endif()
 
 include(CTest)
@@ -44,7 +76,11 @@ if(BUILD_TESTING)
     add_executable(rocketdb_regression_test
         test/db_regression_test.cc
     )
-    target_link_libraries(rocketdb_regression_test rocketdb)
+    target_link_libraries(rocketdb_regression_test PRIVATE rocketdb)
+
+    if(ROCKETDB_ENABLE_ASAN)
+        target_compile_options(rocketdb_regression_test PRIVATE -fsanitize=address -g)
+    endif()
 
     add_test(NAME rocketdb_regression COMMAND rocketdb_regression_test)
     set_tests_properties(rocketdb_regression PROPERTIES TIMEOUT 60)

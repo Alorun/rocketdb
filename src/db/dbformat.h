@@ -31,7 +31,7 @@ namespace config {
 
 class InternalKey;
 
-// the last component of internal keys
+// The last component of internal keys
 enum ValueType { kTypeDeletion = 0x0, kTypeValue = 0x1 };
 
 static const ValueType kValueTypeForSeek = kTypeValue;
@@ -41,7 +41,7 @@ typedef uint64_t SequenceNumber;
 static const SequenceNumber kMaxSequenceNumber = ((0x1ull << 56) - 1);
 
 
-// innermost structure
+// Most inner structure
 struct ParsedInternalKey {
     Slice user_key;
     SequenceNumber sequence;

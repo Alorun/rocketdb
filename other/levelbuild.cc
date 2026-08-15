@@ -1,8 +1,8 @@
 #include <cstdio>
 
-#include "../../include/dumpfile.h"
-#include "../../include/env.h"
-#include "../../include/status.h"
+#include "../include/dumpfile.h"
+#include "../include/env.h"
+#include "../include/status.h"
 
 namespace rocketdb {
 namespace  {
@@ -23,7 +23,7 @@ bool HandleDumpCommand(Env* env, char** files, int num) {
     bool ok = true;
     for (int i = 0; i < num; i++) {
         Status s = DumpFile(env, files[i], &printer);
-        if (s.ok()) {
+        if (!s.ok()) {
             std::fprintf(stderr, "%s\n", s.ToString().c_str());
             ok = false;
         }
@@ -42,7 +42,7 @@ static void Usage() {
 int main(int argc, char** argv) {
     rocketdb::Env* env = rocketdb::Env::Default();
     bool ok = true;
-    if (argc > 2) {
+    if (argc < 3) {
         Usage();
         ok = false;
     } else {
