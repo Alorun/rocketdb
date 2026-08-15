@@ -3,6 +3,7 @@ project(MiniRocketDB)
 
 # 开启 C++17 标准 (RocketDB 依赖)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
 # Sanitizer 开关：默认 OFF，产出干净库（供 cgo 链接）。
@@ -32,6 +33,19 @@ add_library(rocketdb STATIC ${SOURCES})
 # posix 环境依赖多线程库
 target_link_libraries(rocketdb pthread)
 
-# 2. 编译测试入口程序 (稍后创建)
-add_executable(db_test main.cc)
-target_link_libraries(db_test rocketdb)
+# 2. 编译示例入口程序（当前仓库若未提供 main.cc，则仅构建库和测试）
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cc")
+    add_executable(db_test main.cc)
+    target_link_libraries(db_test rocketdb)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(rocketdb_regression_test
+        test/db_regression_test.cc
+    )
+    target_link_libraries(rocketdb_regression_test rocketdb)
+
+    add_test(NAME rocketdb_regression COMMAND rocketdb_regression_test)
+    set_tests_properties(rocketdb_regression PROPERTIES TIMEOUT 60)
+endif()

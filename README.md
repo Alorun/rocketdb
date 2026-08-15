@@ -20,8 +20,26 @@ RocketDB is a local key-value database implementation based on the LSM-Tree appr
 
 ### Build and Examples
 
-CMakeLists.txt:1 will compile the static library rocketdb and build a simple interactive program db_test. The entry point is in main.cc:1, and the supported commands are:
+CMakeLists.txt will compile the static library `rocketdb`. If the repository also contains `main.cc`, it will build the interactive `db_test` example. The supported commands are:
 
 put k1 v1
 get k1
 exit
+
+### Regression Tests
+
+The regression suite is in `test/db_regression_test.cc`. It uses isolated temporary database directories and covers CRUD, WriteBatch/WAL recovery, snapshots, iterators, Bloom filters, flush/compaction/SST reopening, concurrent writers, and the C API.
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+To run the same suite under AddressSanitizer:
+
+```bash
+cmake -S . -B build-asan -DBUILD_TESTING=ON -DROCKETDB_ENABLE_ASAN=ON
+cmake --build build-asan -j
+ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan --output-on-failure
+```
