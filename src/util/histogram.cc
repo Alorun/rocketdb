@@ -8,6 +8,10 @@
 namespace rocketdb {
 
 const double Histogram::kBucketLimit[kNumBuckets] = {
+    0.05,
+    0.10,
+    0.20,
+    0.50,
     1,
     2,
     3,
@@ -200,29 +204,6 @@ void Histogram::Merge(const Histogram& other) {
     }
 }
 
-double Histogram::Median() const { return Percentile(50.0); }
-
-double Histogram::Percentile(double p) const {
-    double threshold = num_ * (p / 100.0);
-    double sum = 0;
-    for (int b = 0; b < kNumBuckets; b++) {
-        sum += buckets_[b];
-        if (sum >= threshold) {
-        // Scale linearly within this bucket
-        double left_point = (b == 0) ? 0 : kBucketLimit[b - 1];
-        double right_point = kBucketLimit[b];
-        double left_sum = sum - buckets_[b];
-        double right_sum = sum;
-        double pos = (threshold - left_sum) / (right_sum - left_sum);
-        double r = left_point + (right_point - left_point) * pos;
-        if (r < min_) r = min_;
-        if (r > max_) r = max_;
-        return r;
-        }
-    }
-    return max_;
-}
-
 double Histogram::Average() const {
     if (num_ == 0.0) return 0;
     return sum_ / num_;
@@ -240,16 +221,17 @@ std::string Histogram::ToString() const {
     std::snprintf(buf, sizeof(buf), "Count: %.0f  Average: %.4f  StdDev: %.2f\n",
                     num_, Average(), StandardDeviation());
     r.append(buf);
-    std::snprintf(buf, sizeof(buf), "Min: %.4f  Median: %.4f  Max: %.4f\n",
-                    (num_ == 0.0 ? 0.0 : min_), Median(), max_);
+    std::snprintf(buf, sizeof(buf), "Min: %.4f  Max: %.4f\n",
+                  (num_ == 0.0 ? 0.0 : min_), max_);
     r.append(buf);
+    if (num_ == 0.0) return r;
     r.append("------------------------------------------------------\n");
     const double mult = 100.0 / num_;
     double sum = 0;
     for (int b = 0; b < kNumBuckets; b++) {
         if (buckets_[b] <= 0.0) continue;
         sum += buckets_[b];
-        std::snprintf(buf, sizeof(buf), "[ %7.0f, %7.0f ) %7.0f %7.3f%% %7.3f%% ",
+        std::snprintf(buf, sizeof(buf), "[ %8.3f, %8.3f ) %7.0f %7.3f%% %7.3f%% ",
                     ((b == 0) ? 0.0 : kBucketLimit[b - 1]),  // left
                     kBucketLimit[b],                         // right
                     buckets_[b],                             // count

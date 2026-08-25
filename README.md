@@ -43,3 +43,48 @@ cmake -S . -B build-asan -DBUILD_TESTING=ON -DROCKETDB_ENABLE_ASAN=ON
 cmake --build build-asan -j
 ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan --output-on-failure
 ```
+
+### Basic Benchmarks
+
+The repository includes a standalone, single-threaded benchmark for basic
+write and read workloads. Benchmark targets are opt-in and are not part of
+CTest. It provides separate `throughput` and `latency` measurement modes.
+Latency mode is the default and includes the distribution histogram; select
+`--mode=throughput` for a clock-free per-operation throughput measurement.
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DROCKETDB_BUILD_BENCHMARKS=ON
+cmake --build build-release -j
+./build-release/rocketdb_bench \
+  --benchmarks=fillseq,fillrandom,readseq,readrandom \
+  --num=1000000 --reads=1000000 --key_size=16 --value_size=100 \
+  --compression=none --mode=throughput
+```
+
+Throughput mode times only the complete workload. It does not read a clock for
+each operation. Latency mode stores each sampled operation's raw `uint64_t`
+nanosecond duration, sorts those samples, and reports nearest-rank p50/p95/p99
+from the real data rather than from histogram buckets:
+
+```bash
+./build-release/rocketdb_bench --benchmarks=readrandom --num=1000000 \
+  --reads=1000000 --mode=latency --latency_sample=1
+```
+
+Use a larger `--latency_sample` (for example `100`) to reduce timing overhead
+while collecting a representative sample. The distribution histogram is only a
+visualization; it does not participate in percentile calculations. Each run
+overwrites `bench/benchmark_results.txt` with the complete output.
+
+Available workloads are `fillseq`, `fillrandom`, `readseq`, and `readrandom`.
+`readseq` scans with an iterator; `readrandom` issues point reads.
+Read workloads prefill and compact a temporary database outside the timed
+section. Each `fillseq` or `fillrandom` workload resets that temporary
+database first, so write workloads do not share data and each starts empty.
+The same temporary directory path is recreated between workloads and removed
+after the run. To run against an existing database, pass both
+`--db=/path/to/db` and `--use_existing_db`; the benchmark never removes that
+directory, so workloads intentionally share that user-selected state.
+Existing-database read workloads expect the benchmark's fixed-width numeric
+keys in `[0, num)` and values of `--value_size` bytes. Run
+`rocketdb_bench --help` for all options.

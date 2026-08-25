@@ -6,7 +6,7 @@ namespace rocketdb {
 
 class Histogram {
     public:
-        Histogram() {}
+        Histogram() { Clear(); }
         ~Histogram() {}
 
         void Clear();
@@ -16,10 +16,8 @@ class Histogram {
         std::string ToString() const;
 
     private:
-        enum { kNumBuckets = 154 };
+        enum { kNumBuckets = 158 };
 
-        double Median() const;
-        double Percentile(double p) const;
         double Average() const;
         double StandardDeviation() const;
 

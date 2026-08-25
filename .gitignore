@@ -4,3 +4,4 @@ build-asan/
 build-dev/
 build-test/
 build-test-asan/
+bench/benchmark_results.txt

@@ -4,6 +4,7 @@ project(MiniRocketDB)
 # AddressSanitizer is opt-in so the default static library remains suitable
 # for normal consumers, including cgo callers.
 option(ROCKETDB_ENABLE_ASAN "Build RocketDB with AddressSanitizer (debug only)" OFF)
+option(ROCKETDB_BUILD_BENCHMARKS "Build RocketDB benchmark tools" OFF)
 
 # Keep the production library separate from command-line tools.  In
 # particular, src/db/levelbuild.cc defines its own main() and must not become
@@ -69,6 +70,22 @@ if(ROCKETDB_ENABLE_ASAN)
 else()
     message(STATUS "RocketDB: clean release build (-O2, no sanitizer)")
     target_compile_options(rocketdb PRIVATE -O2)
+endif()
+
+if(ROCKETDB_BUILD_BENCHMARKS)
+    add_executable(rocketdb_bench
+        bench/db_bench.cc
+    )
+    target_link_libraries(rocketdb_bench PRIVATE rocketdb)
+    # Histogram is an internal utility intentionally reused by db_bench.
+    target_include_directories(rocketdb_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(rocketdb_bench PRIVATE
+        ROCKETDB_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/benchmark_results.txt"
+    )
+
+    if(ROCKETDB_ENABLE_ASAN)
+        target_compile_options(rocketdb_bench PRIVATE -fsanitize=address -g)
+    endif()
 endif()
 
 include(CTest)
