@@ -94,6 +94,8 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
         assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
     }
 
+    // After flushing a block, choose an index key such that:
+    // previous_block_max <= index_key < next_block_min.
     if (r->pending_index_entry) {
         assert(r->data_block.empty());
         r->options.comparator->FindShortestSeparator(&r->last_key, key);

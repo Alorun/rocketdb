@@ -40,12 +40,11 @@ typedef uint64_t SequenceNumber;
 
 static const SequenceNumber kMaxSequenceNumber = ((0x1ull << 56) - 1);
 
-
 // Most inner structure
 struct ParsedInternalKey {
     Slice user_key;
-    SequenceNumber sequence;
-    ValueType type;
+    SequenceNumber sequence;    // 7 bytes
+    ValueType type;             // 1 byte
 
     ParsedInternalKey() {}
     ParsedInternalKey(const Slice& u, const SequenceNumber& seq, ValueType t) 

@@ -97,7 +97,9 @@ class DBImpl : public DB {
 
         Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
+        // Check whehter the current memtable state allows writes
         Status MakeRoomForWrite(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        // Combine multiple batchs into one large batch
         WriteBatch* BuildBatchGroup(Writer** last_writer) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         void RecordBackgroundError(const Status& s);
@@ -122,8 +124,8 @@ class DBImpl : public DB {
         const InternalKeyComparator internal_comparator_;
         const InternalFilterPolicy internal_filter_policy_;
         const Options options_;  // options_.comparator == &internal_comparator_
-        // Do you Create your logs and cache?
-        // If so, you are responnsible for deleting them.
+
+        // If you Create your logs and cache, you are responnsible for deleting them.
         const bool owns_info_log_;
         const bool owns_cache_;
         const std::string dbname_;
@@ -148,6 +150,7 @@ class DBImpl : public DB {
 
         // Queue of wirters
         std::deque<Writer*> writers_ GUARDED_BY(mutex_);
+        // The buffer is used when merging batches
         WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
 
         SnapshotList snapshots_ GUARDED_BY(mutex_);

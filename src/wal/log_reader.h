@@ -63,7 +63,7 @@ class Reader {
         Reporter* const reporter_;
         bool const checksum_;
         char* const backing_store_;  // Raw storage
-        Slice buffer_;  // Store unparsed data in backing_store
+        Slice buffer_;  // Store unparsed data in backing_store (one block)
         bool eof_;  // Flag the file has been read
 
         // Offset of the last record returned by ReadRecord

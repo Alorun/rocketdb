@@ -13,7 +13,7 @@ namespace rocketdb {
 //    count: fixed32 (4 bytes)
 //    data: record[count]
 
-// record := kTypeValue varstring varstring | kTypeDeletion varstring
+// record := kTypeValue varstring(key) + varstring(value) | kTypeDeletion + varstring(key)
 // varstring := len: varint32 + data: uint8[len]
 
 // WriteBatch Header = sequence: fixed64 (8 bytes) + count: fixed32 (4 bytes) = 12 bytes
@@ -104,6 +104,7 @@ void WriteBatch::Append(const WriteBatch& source) {
     WriteBatchInternal::Append(this, & source);
 }
 
+// Anonymous command space restricts read access to the current file only.
 namespace  {
 class MemTableInserter : public WriteBatch::Handler {
     public:

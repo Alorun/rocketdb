@@ -681,6 +681,7 @@ void DBImpl::BackgroundCall() {
 void DBImpl::BackgroundCompaction() {
     mutex_.AssertHeld();
 
+    // if imm_ is not empty, compact MemTable
     if (imm_ != nullptr) {
         CompactMemTable();
         return;
@@ -915,7 +916,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
         // The core logic of compression.
         // Handle key/value, add to state, etc.
-        bool drop = false;  // If drop == true, the record is not retained
+
+        // If drop == true, the record is not retained
+        bool drop = false;  
         if (!ParseInternalKey(key, &ikey)) {
             // Don't hide error keys
             current_user_key.clear();
@@ -994,6 +997,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     delete input;
     input = nullptr;
 
+    // Record the stat of compaction
     CompactionStats stats;
     stats.micros = env_->NowMicros() - start_micros - imm_micros;
     for (int which = 0; which < 2; which++) {
@@ -1249,8 +1253,8 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
 
     size_t size = WriteBatchInternal::ByteSize(first->batch);
 
-    // If the original write is smalll.
-    // Limit the growth so we do not slow down the samll write too much
+    // If the original write is small.
+    // Limit the growth so we do not slow down the small write too much
     size_t max_size = 1 << 20;
     if (size <= (128 << 10)) {
         max_size = size + (128 << 10);
@@ -1317,7 +1321,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
             // There are too many level-0 files, waiting for file merging to decrease.
             Log(options_.info_log, "Too many L0 files; waiting...\n");
             background_work_finished_signal_.Wait();
-        } else {  // mem is fully, but no compaction is running
+        } else {  
+            // mem is fully, but no compaction is running
             // Attempt to switch to a new memtable and trigger compaction of old
             assert(versions_->PrevLogNumber() == 0);
             uint64_t new_log_number = versions_->NewFileNumber();

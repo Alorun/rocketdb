@@ -1,5 +1,6 @@
 build/
 build-release/
 build-asan/
+build-dev/
 build-test/
 build-test-asan/

@@ -15,7 +15,7 @@ class VersionSet;
 struct FileMetaData {
     FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
 
-    int refs;               // NUmber of time cited by different versions
+    int refs;               // Number of time cited by different versions
     int allowed_seeks;      // Seeks allowed until compaction
     uint64_t number;        // File number
     uint64_t file_size;     // File size in bytes

@@ -58,7 +58,7 @@ class Version {
         void Ref();
         void Unref();
 
-        // Return a level of all files to input.
+        // Return all SST files that overlap with the extent.
         void GetOverlappingInputs(int level, const InternalKey* begin, const InternalKey* end, std::vector<FileMetaData*>* inoputs);
 
         // Returns true iff some file in the specified level overlaps.
