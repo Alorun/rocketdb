@@ -1,5 +1,6 @@
 #include "../../include/cache.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -356,8 +357,58 @@ class SharedLRUCache : public Cache {
         uint64_t last_id_;
 };
 
+// Keeping statistics in a decorator leaves the normal LRU Lookup path, which
+// is also used by TableCache, completely unchanged when statistics are off.
+class StatisticsCache : public Cache {
+    public:
+        explicit StatisticsCache(size_t capacity)
+            : target_(NewLRUCache(capacity)), hit_(0), miss_(0) {}
+
+        ~StatisticsCache() override { delete target_; }
+
+        Handle* Insert(const Slice& key, void* value, size_t charge,
+                       void (*deleter)(const Slice& key, void* value)) override {
+            return target_->Insert(key, value, charge, deleter);
+        }
+
+        Handle* Lookup(const Slice& key) override {
+            Handle* handle = target_->Lookup(key);
+            if (handle == nullptr) {
+                miss_.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                hit_.fetch_add(1, std::memory_order_relaxed);
+            }
+            return handle;
+        }
+
+        void Release(Handle* handle) override { target_->Release(handle); }
+
+        void* Value(Handle* handle) override { return target_->Value(handle); }
+
+        void Erase(const Slice& key) override { target_->Erase(key); }
+
+        uint64_t NewId() override { return target_->NewId(); }
+
+        void Prune() override { target_->Prune(); }
+
+        size_t TotalCharge() const override { return target_->TotalCharge(); }
+
+        bool GetStats(CacheStats* stats) const override {
+            stats->hit = hit_.load(std::memory_order_relaxed);
+            stats->miss = miss_.load(std::memory_order_relaxed);
+            return true;
+        }
+
+    private:
+        Cache* const target_;
+        std::atomic<uint64_t> hit_;
+        std::atomic<uint64_t> miss_;
+};
+
 }
 
 Cache* NewLRUCache(size_t capacity) { return new SharedLRUCache(capacity); }
+
+Cache* NewLRUCacheWithStatistics(size_t capacity) { return new StatisticsCache(capacity); }
 
 }

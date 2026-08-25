@@ -8,6 +8,7 @@
 
 #include "dbformat.h"
 #include "memtable.h"
+#include "perf_counters.h"
 #include "snapshot.h"
 #include "../wal/log_writer.h"
 #include "../port/port.h"
@@ -78,6 +79,15 @@ class DBImpl : public DB {
             int64_t bytes_written;
         };
 
+        // Collect the flush information required for benchmarking
+        struct FlushResult {
+            FlushResult() : output_level(0), bytes_written(0), has_output(false) {}
+
+            int output_level;
+            uint64_t bytes_written;
+            bool has_output;
+        };
+
         Iterator* NewInternalIterator(const ReadOptions&, SequenceNumber* latest_snapshot, uint32_t* seed);
 
         Status NewDB();
@@ -95,7 +105,8 @@ class DBImpl : public DB {
         Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
                               VersionEdit* edit, SequenceNumber* max_sequence) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base,
+                                FlushResult* result) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         // Check whehter the current memtable state allows writes
         Status MakeRoomForWrite(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -170,6 +181,10 @@ class DBImpl : public DB {
         Status bg_error_ GUARDED_BY(mutex_);
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+
+        // Fixed-size relaxed atomics. These are read without resetting by the
+        // machine-readable performance properties.
+        DBPerfCounters perf_counters_;
 };
 
 // Sanitize db options, The caller should should delete result.info_log if it is not equal to src.info_log.

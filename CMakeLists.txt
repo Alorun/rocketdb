@@ -94,6 +94,7 @@ if(BUILD_TESTING)
         test/db_regression_test.cc
     )
     target_link_libraries(rocketdb_regression_test PRIVATE rocketdb)
+    target_include_directories(rocketdb_regression_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
     if(ROCKETDB_ENABLE_ASAN)
         target_compile_options(rocketdb_regression_test PRIVATE -fsanitize=address -g)

@@ -431,7 +431,13 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
         if (mem->ApproximateMemoeyUsage() > options_.write_buffer_size) {
             compactions++;
             *save_manifest = true;
-            status = WriteLevel0Table(mem, edit, nullptr);
+            const uint64_t start_micros = env_->NowMicros();
+            FlushResult result;
+            status = WriteLevel0Table(mem, edit, nullptr, &result);
+            CompactionStats stats;
+            stats.micros = env_->NowMicros() - start_micros;
+            stats.bytes_written = result.bytes_written;
+            stats_[result.output_level].Add(stats);
             mem->Unref();
             mem = nullptr;
             if (!status.ok()) {
@@ -470,7 +476,13 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
         // mem did not get reused; compact it
         if (status.ok()) {
             *save_manifest = true;
-            status = WriteLevel0Table(mem, edit, nullptr);
+            const uint64_t start_micros = env_->NowMicros();
+            FlushResult result;
+            status = WriteLevel0Table(mem, edit, nullptr, &result);
+            CompactionStats stats;
+            stats.micros = env_->NowMicros() - start_micros;
+            stats.bytes_written = result.bytes_written;
+            stats_[result.output_level].Add(stats);
         }
         mem->Unref();
     }
@@ -478,9 +490,10 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
     return status;
 }
     
-Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base) {
+Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base,
+                                FlushResult* result) {
     mutex_.AssertHeld();
-    const uint64_t start_micros = env_->NowMicros();
+    *result = FlushResult();
     FileMetaData meta;
     meta.number = versions_->NewFileNumber();
     pending_outputs_.insert(meta.number);
@@ -508,12 +521,10 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base)
             level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
         }
         edit->AddFile(level, meta.number, meta.file_size, meta.smallest, meta.largest);
+        result->output_level = level;
+        result->bytes_written = meta.file_size;
+        result->has_output = true;
     }
-
-    CompactionStats stats;
-    stats.micros = env_->NowMicros() - start_micros;
-    stats.bytes_written = meta.file_size;
-    stats_[level].Add(stats);
     return s;
 }
 
@@ -521,10 +532,12 @@ void DBImpl::CompactMemTable() {
     mutex_.AssertHeld();
     assert(imm_ != nullptr);
 
+    const uint64_t start_micros = env_->NowMicros();
     VersionEdit edit;
     Version* base = versions_->current();
     base->Ref();
-    Status s = WriteLevel0Table(imm_, &edit, base);
+    FlushResult result;
+    Status s = WriteLevel0Table(imm_, &edit, base, &result);
     base->Unref();
 
     if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
@@ -538,6 +551,14 @@ void DBImpl::CompactMemTable() {
     }
 
     if (s.ok()) {
+        CompactionStats stats;
+        stats.micros = env_->NowMicros() - start_micros;
+        stats.bytes_written = result.bytes_written;
+        stats_[result.output_level].Add(stats);
+        if (result.has_output) {
+            perf_counters_.RecordFlush(result.output_level, static_cast<uint64_t>(stats.micros),
+                                       result.bytes_written);
+        }
         imm_->Unref();
         imm_ = nullptr;
         has_imm_.store(false, std::memory_order_release);
@@ -715,7 +736,9 @@ void DBImpl::BackgroundCompaction() {
         c->edit()->RemoveFile(c->level(), f->number);
         c->edit()->AddFile(c->level() + 1, f->number, f->file_size, f->smallest, f->largest);
         status = versions_->LogAndApply(c->edit(), &mutex_);
-        if (!status.ok()) {
+        if (status.ok()) {
+            perf_counters_.RecordTrivialMove(c->level() + 1);
+        } else {
             RecordBackgroundError(status);
         }
         VersionSet::LevelSummaryStorage tmp;
@@ -1010,12 +1033,18 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     }
 
     mutex_.Lock();
-    stats_[compact->compaction->level() + 1].Add(stats);
 
     if (status.ok()) {
         // Modify MANIFEST file, the compression has been offcially implemented.
         // The new file are now publicly available.
         status = InstallCompactionResults(compact);
+    }
+    if (status.ok()) {
+        const int output_level = compact->compaction->level() + 1;
+        stats_[output_level].Add(stats);
+        perf_counters_.RecordMajorCompaction(
+            output_level, static_cast<uint64_t>(stats.micros),
+            static_cast<uint64_t>(stats.bytes_read), static_cast<uint64_t>(stats.bytes_written));
     }
     if (!status.ok()) {
         RecordBackgroundError(status);
@@ -1305,10 +1334,13 @@ Status DBImpl::MakeRoomForWrite(bool force) {
             // this delay hands over some CPU to the compaction thread in
             // case it is sharing the same core as the writer.
             // "Smooth long-tail latency"
+            const uint64_t stall_start_micros = env_->NowMicros();
             mutex_.Unlock();
             env_->SleepForMicroseconds(1000);
             allow_delay = false;  // Make sure only one delay
             mutex_.Lock();
+            perf_counters_.RecordWriteStall(WriteStallType::kL0Slowdown,
+                                            env_->NowMicros() - stall_start_micros);
         } else if (!force && (mem_->ApproximateMemoeyUsage() <= options_.write_buffer_size)) {
             // There is room in current memtable
             break;
@@ -1316,11 +1348,23 @@ Status DBImpl::MakeRoomForWrite(bool force) {
             // We have filled up the current memtable.
             // But the previous one is still being compacted, so we wait.
             Log(options_.info_log, "Current memtable full; waiting...\n");
+            const uint64_t stall_start_micros = env_->NowMicros();
             background_work_finished_signal_.Wait();
+            perf_counters_.RecordWriteStall(WriteStallType::kImmutableMemtableWait,
+                                            env_->NowMicros() - stall_start_micros);
         } else if (versions_->NumLevelFiles(0) >= config::kLO_SlowdownWritesTrigger) {
             // There are too many level-0 files, waiting for file merging to decrease.
             Log(options_.info_log, "Too many L0 files; waiting...\n");
+            const bool is_stop =
+                versions_->NumLevelFiles(0) >= config::kLO_StopWritesTrigger;
+            const uint64_t stall_start_micros = env_->NowMicros();
             background_work_finished_signal_.Wait();
+            const uint64_t stall_micros = env_->NowMicros() - stall_start_micros;
+            if (is_stop) {
+                perf_counters_.RecordWriteStall(WriteStallType::kL0Stop, stall_micros);
+            } else {
+                perf_counters_.RecordWriteStall(WriteStallType::kL0Slowdown, stall_micros);
+            }
         } else {  
             // mem is fully, but no compaction is running
             // Attempt to switch to a new memtable and trigger compaction of old
@@ -1354,6 +1398,28 @@ Status DBImpl::MakeRoomForWrite(bool force) {
     }
     return s;
 }
+
+namespace {
+
+void AppendUint64Property(std::string* output, const char* key, uint64_t value) {
+    char line[128];
+    const int length = std::snprintf(line, sizeof(line), "%s=%llu\n", key,
+                                     static_cast<unsigned long long>(value));
+    output->append(line, static_cast<size_t>(length));
+}
+
+void AppendTimedEventProperties(std::string* output, const char* prefix,
+                                const TimedEventSnapshot& snapshot) {
+    char key[96];
+    std::snprintf(key, sizeof(key), "%s_count", prefix);
+    AppendUint64Property(output, key, snapshot.count);
+    std::snprintf(key, sizeof(key), "%s_total_micros", prefix);
+    AppendUint64Property(output, key, snapshot.total_micros);
+    std::snprintf(key, sizeof(key), "%s_max_micros", prefix);
+    AppendUint64Property(output, key, snapshot.max_micros);
+}
+
+}  // namespace
 
 bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     value->clear();
@@ -1392,6 +1458,55 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
                               stats_[level].bytes_written/ 1048576.0);
                 value->append(buf);
             }
+        }
+        return true;
+    } else if (in == "perf-stats") {
+        AppendUint64Property(value, "version", 1);
+        const FlushStatsSnapshot flush = perf_counters_.FlushSnapshot();
+        AppendUint64Property(value, "flush_count", flush.count);
+        AppendUint64Property(value, "flush_total_micros", flush.total_micros);
+        AppendUint64Property(value, "flush_max_micros", flush.max_micros);
+        AppendUint64Property(value, "flush_bytes_written", flush.bytes_written);
+
+        char key[96];
+        for (int level = 0; level < config::kNumLevels; ++level) {
+            std::snprintf(key, sizeof(key), "flush_count_by_output_level.%d", level);
+            AppendUint64Property(value, key, flush.count_by_output_level[level]);
+
+            const MajorCompactionStatsSnapshot major =
+                perf_counters_.MajorCompactionSnapshot(level);
+            std::snprintf(key, sizeof(key), "major_compaction_count.%d", level);
+            AppendUint64Property(value, key, major.count);
+            std::snprintf(key, sizeof(key), "major_compaction_total_micros.%d", level);
+            AppendUint64Property(value, key, major.total_micros);
+            std::snprintf(key, sizeof(key), "major_compaction_max_micros.%d", level);
+            AppendUint64Property(value, key, major.max_micros);
+            std::snprintf(key, sizeof(key), "major_compaction_bytes_read.%d", level);
+            AppendUint64Property(value, key, major.bytes_read);
+            std::snprintf(key, sizeof(key), "major_compaction_bytes_written.%d", level);
+            AppendUint64Property(value, key, major.bytes_written);
+            std::snprintf(key, sizeof(key), "trivial_move_count.%d", level);
+            AppendUint64Property(value, key, perf_counters_.TrivialMoveCount(level));
+        }
+
+        AppendTimedEventProperties(value, "immutable_memtable_wait",
+                                   perf_counters_.WriteStallSnapshot(
+                                       WriteStallType::kImmutableMemtableWait));
+        AppendTimedEventProperties(value, "l0_slowdown",
+                                   perf_counters_.WriteStallSnapshot(
+                                       WriteStallType::kL0Slowdown));
+        AppendTimedEventProperties(value, "l0_stop",
+                                   perf_counters_.WriteStallSnapshot(WriteStallType::kL0Stop));
+        return true;
+    } else if (in == "block-cache-stats") {
+        AppendUint64Property(value, "version", 1);
+        CacheStats stats;
+        if (options_.block_cache->GetStats(&stats)) {
+            AppendUint64Property(value, "supported", 1);
+            AppendUint64Property(value, "block_cache_hit", stats.hit);
+            AppendUint64Property(value, "block_cache_miss", stats.miss);
+        } else {
+            AppendUint64Property(value, "supported", 0);
         }
         return true;
     } else if (in == "sstables") {

@@ -14,6 +14,15 @@ class Cache;
 // The implementation of Cache use a least-recently-used eviction policy
 Cache* NewLRUCache(size_t capaeity);
 
+// Create an LRU cache that additionally counts Lookup hits and misses. The
+// counters are per Cache instance and are disabled in NewLRUCache().
+Cache* NewLRUCacheWithStatistics(size_t capacity);
+
+struct CacheStats {
+    uint64_t hit;
+    uint64_t miss;
+};
+
 class Cache {
     public:
         Cache() = default;
@@ -54,6 +63,14 @@ class Cache {
 
         // Return an estimate of the combined charges of all elements stored in the cache
         virtual size_t TotalCharge() const = 0;
+
+        // Return false when this Cache implementation does not expose lookup
+        // statistics. Implementations that return true must provide a snapshot
+        // without resetting their counters.
+        virtual bool GetStats(CacheStats* stats) const {
+            (void)stats;
+            return false;
+        }
 };
 
 

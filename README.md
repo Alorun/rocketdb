@@ -44,6 +44,50 @@ cmake --build build-asan -j
 ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan --output-on-failure
 ```
 
+### Performance Statistics
+
+`DB::GetProperty()` exposes two versioned, machine-readable cumulative
+properties. Each line is `key=value`, and both formats start with `version=1`:
+
+- `rocketdb.perf-stats` reports successful runtime MemTable flushes, successful
+  rewriting (major) compactions, successful trivial moves, and actual write
+  delay/wait intervals. Per-level suffixes denote the output level, matching
+  the level used by `rocketdb.stats`.
+- `rocketdb.block-cache-stats` reports `supported=0` for the default cache and
+  for custom caches without statistics. To opt in, set `Options::block_cache`
+  to `NewLRUCacheWithStatistics(capacity)`; the property then also reports
+  `block_cache_hit` and `block_cache_miss` for that cache instance.
+
+All values are monotonic from the relevant DB or statistics-cache object
+creation and are never reset by reading a property. Counts, total durations,
+and byte totals can be measured over an interval with `end - begin`. A maximum
+is the maximum since DB open, however, so an interval maximum is **not**
+`end.max - begin.max`. Use a fresh DB/statistics cache or a separately designed
+statistics epoch when a benchmark requires a per-run maximum.
+
+Flush statistics count only a non-empty SST installed by a runtime MemTable
+flush. Tables built while replaying WAL files during `DB::Open()` are excluded
+from `rocketdb.perf-stats`. Counters are zero-initialized with the DB object;
+background work scheduled at the end of `DB::Open()` can begin accumulating
+after recovery. Major compaction byte totals include SST input and output bytes
+and exclude trivial moves. An SST write-amplification estimate can use
+`(flush_bytes_written + major_compaction_bytes_written) / user_bytes_written`;
+this deliberately excludes WAL bytes and is not complete physical write
+amplification.
+
+The block-cache wrapper counts only lookups made through the configured data
+block cache. TableCache owns a separate ordinary LRU instance, so its hits and
+misses are not included. If multiple DBs share one statistics-enabled block
+cache, the counters describe that shared cache instance rather than any one DB.
+Hit rate is computed by the caller as `hit / (hit + miss)`. The wrapper reports
+all data-block lookups through that cache instance, including compaction reads
+that probe the cache with `fill_cache=false`. It is not an OS page-cache or
+mmap hit-rate metric; mmap-backed blocks can intentionally bypass insertion.
+
+Use the existing `rocketdb.num-files-at-level0` property for current L0 file
+count. A benchmark that polls it once per second must call its observed maximum
+`sampled_peak_l0_files`, since short-lived true peaks can fall between samples.
+
 ### Basic Benchmarks
 
 The repository includes a standalone, single-threaded benchmark for basic
