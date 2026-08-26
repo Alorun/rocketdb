@@ -80,11 +80,21 @@ if(ROCKETDB_BUILD_BENCHMARKS)
     # Histogram is an internal utility intentionally reused by db_bench.
     target_include_directories(rocketdb_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(rocketdb_bench PRIVATE
-        ROCKETDB_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/benchmark_results.txt"
+        ROCKETDB_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/basic_benchmark_results.md"
+    )
+
+    add_executable(rocketdb_mixed_bench
+        bench/mixed_bench.cc
+    )
+    target_link_libraries(rocketdb_mixed_bench PRIVATE rocketdb)
+    target_include_directories(rocketdb_mixed_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(rocketdb_mixed_bench PRIVATE
+        ROCKETDB_MIXED_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/mixed_benchmark_results.md"
     )
 
     if(ROCKETDB_ENABLE_ASAN)
         target_compile_options(rocketdb_bench PRIVATE -fsanitize=address -g)
+        target_compile_options(rocketdb_mixed_bench PRIVATE -fsanitize=address -g)
     endif()
 endif()
 

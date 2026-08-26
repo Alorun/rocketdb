@@ -632,6 +632,34 @@ void TestBlockCacheStatistics() {
         GetNumericProperty(fixture.db(), "rocketdb.block-cache-stats");
     CHECK(after_hit.at("block_cache_hit") > after_miss.at("block_cache_hit"));
   }
+
+  {
+    // Mirror the benchmark lifecycle: create an uncompressed SST with the
+    // ordinary cache, close the DB, then reopen it with the statistics cache.
+    DBFixture fixture("block-cache-reopen-stats");
+    fixture.mutable_options()->block_size = 1024;
+    fixture.Open();
+    const std::string expected(8 * 1024, 'r');
+    CheckOk(fixture.db()->Put(rocketdb::WriteOptions(), "reopened-cache-key", expected),
+            "put reopened cache input");
+    fixture.db()->CompactRange(nullptr, nullptr);
+    fixture.Close();
+    fixture.mutable_options()->block_cache = cache;
+    fixture.Open();
+    cache->Prune();
+
+    const auto before =
+        GetNumericProperty(fixture.db(), "rocketdb.block-cache-stats");
+    ExpectValue(fixture.db(), "reopened-cache-key", expected);
+    const auto after_miss =
+        GetNumericProperty(fixture.db(), "rocketdb.block-cache-stats");
+    CHECK(after_miss.at("block_cache_miss") > before.at("block_cache_miss"));
+
+    ExpectValue(fixture.db(), "reopened-cache-key", expected);
+    const auto after_hit =
+        GetNumericProperty(fixture.db(), "rocketdb.block-cache-stats");
+    CHECK(after_hit.at("block_cache_hit") > after_miss.at("block_cache_hit"));
+  }
   delete cache;
 
   DBFixture default_fixture("block-cache-default-off");

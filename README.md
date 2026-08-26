@@ -118,7 +118,7 @@ from the real data rather than from histogram buckets:
 Use a larger `--latency_sample` (for example `100`) to reduce timing overhead
 while collecting a representative sample. The distribution histogram is only a
 visualization; it does not participate in percentile calculations. Each run
-overwrites `bench/benchmark_results.txt` with the complete output.
+overwrites `bench/basic_benchmark_results.md` with a concise Markdown report.
 
 Available workloads are `fillseq`, `fillrandom`, `readseq`, and `readrandom`.
 `readseq` scans with an iterator; `readrandom` issues point reads.
@@ -132,3 +132,42 @@ directory, so workloads intentionally share that user-selected state.
 Existing-database read workloads expect the benchmark's fixed-width numeric
 keys in `[0, num)` and values of `--value_size` bytes. Run
 `rocketdb_bench --help` for all options.
+
+### Mixed Read/Write Benchmarks
+
+`rocketdb_mixed_bench` is a separate executable for concurrent random reads and
+random overwrite writes. By default it runs the `50/50` and `95/5` read/write
+ratios with `1,2,4,8` threads for 30 seconds per scenario. Every scenario uses
+a newly prefilled and compacted temporary database; prefill is outside the
+measured interval. The temporary database is removed after that scenario unless
+`--keep_db` is used.
+
+```bash
+./build-release/rocketdb_mixed_bench \
+  --read_ratios=50,95 --threads=1,2,4,8 --duration=30 \
+  --num=1000000 --block_cache_size=8388608 --mode=throughput
+```
+
+Throughput mode uses one clock around the complete scenario and does not time
+individual operations. Use latency mode in a separate run to collect raw
+nanosecond samples and nearest-rank p50/p95/p99/p99.9/max values for reads and
+writes:
+
+```bash
+./build-release/rocketdb_mixed_bench \
+  --read_ratios=50,95 --threads=1,2,4,8 --duration=30 \
+  --mode=latency --latency_sample=100
+```
+
+The report also includes Flush and Major Compaction deltas, Write Stall
+categories, current and sampled-peak L0 files, Block Cache hit rate, and SST
+write amplification. Maxima are explicitly reported as values since that
+scenario database was opened; sampled peak L0 is not a true instantaneous
+peak. Block Cache counters cover all data-block lookups during the interval,
+including background compaction lookups; TableCache is excluded. The mixed
+benchmark normalizes mmap-backed random reads into the scratch-buffer path so
+that uncompressed SST blocks can populate the configured Block Cache. Before
+each scenario it verifies a first-read Miss followed by a same-key Hit, prunes
+that warmed block, and then takes the starting counter snapshot. Each run
+overwrites `bench/mixed_benchmark_results.md`. Run
+`rocketdb_mixed_bench --help` for all options.

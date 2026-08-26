@@ -5,3 +5,5 @@ build-dev/
 build-test/
 build-test-asan/
 bench/benchmark_results.txt
+bench/basic_benchmark_results.md
+bench/mixed_benchmark_results.md

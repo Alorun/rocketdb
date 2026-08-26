@@ -273,25 +273,35 @@ class Stats {
     const double megabytes_per_second =
         seconds == 0.0 ? 0.0 : (static_cast<double>(bytes_) / 1048576.0) / seconds;
 
-    output << name << ": " << operations_ << " ops, " << std::fixed << std::setprecision(2)
-           << seconds << " s, " << ops_per_second << " ops/s, " << megabytes_per_second
-           << " MiB/s, mode: " << MeasurementModeName(measurement_mode_) << '\n';
-    if (measurement_mode_ != MeasurementMode::kLatency) return;
+    output << "### " << name << "\n\n"
+           << "| Metric | Value |\n"
+           << "|---|---:|\n"
+           << "| Operations | " << operations_ << " |\n"
+           << "| Duration (s) | " << std::fixed << std::setprecision(3) << seconds << " |\n"
+           << "| Throughput (ops/s) | " << std::setprecision(2) << ops_per_second << " |\n"
+           << "| Throughput (MiB/s) | " << megabytes_per_second << " |\n"
+           << "| Mode | " << MeasurementModeName(measurement_mode_) << " |\n";
+    if (measurement_mode_ != MeasurementMode::kLatency) {
+      output << '\n';
+      return;
+    }
 
     if (latency_ns_.empty()) Fail("latency mode did not record any samples");
     std::sort(latency_ns_.begin(), latency_ns_.end());
     long double total_ns = 0;
     for (const uint64_t latency_ns : latency_ns_) total_ns += latency_ns;
 
-    output << "Latency samples: " << latency_ns_.size() << " (every " << latency_sample_
-           << " operation, stored as raw nanoseconds)\n"
-           << std::fixed << std::setprecision(3)
-           << "  average: " << static_cast<double>(total_ns / latency_ns_.size() / 1000.0L)
-           << " us  p50: " << ToMicros(NearestRank(50)) << " us  p95: "
-           << ToMicros(NearestRank(95)) << " us  p99: " << ToMicros(NearestRank(99))
-           << " us  min: " << ToMicros(latency_ns_.front()) << " us  max: "
-           << ToMicros(latency_ns_.back()) << " us\n";
-    output << "Latency histogram (microseconds; visualization only):\n" << latency_.ToString();
+    output << "| Latency samples | " << latency_ns_.size() << " (every " << latency_sample_
+           << " operation) |\n\n"
+           << "| Average (us) | P50 (us) | P95 (us) | P99 (us) | Min (us) | Max (us) |\n"
+           << "|---:|---:|---:|---:|---:|---:|\n"
+           << std::fixed << std::setprecision(3) << "| "
+           << static_cast<double>(total_ns / latency_ns_.size() / 1000.0L) << " | "
+           << ToMicros(NearestRank(50)) << " | " << ToMicros(NearestRank(95)) << " | "
+           << ToMicros(NearestRank(99)) << " | " << ToMicros(latency_ns_.front()) << " | "
+           << ToMicros(latency_ns_.back()) << " |\n\n"
+           << "Latency histogram (microseconds; visualization only):\n\n```text\n"
+           << latency_.ToString() << "```\n\n";
   }
 
  private:
@@ -333,15 +343,22 @@ class BenchmarkRunner {
   ~BenchmarkRunner() { Cleanup(); }
 
   void Run() {
-    output_ << "RocketDB basic benchmark\n"
-            << "  db: " << dbname_ << (owns_database_ ? " (temporary)" : " (existing)") << '\n'
-            << "  num: " << config_.num << ", reads: " << config_.reads
-            << ", key_size: " << config_.key_size << ", value_size: " << config_.value_size
-            << ", threads: 1, mode: " << MeasurementModeName(config_.measurement_mode);
+    output_ << "# RocketDB Basic Benchmark\n\n"
+            << "## Configuration\n\n"
+            << "| Setting | Value |\n"
+            << "|---|---:|\n"
+            << "| Database | " << dbname_
+            << (owns_database_ ? " (temporary)" : " (existing)") << " |\n"
+            << "| Records | " << config_.num << " |\n"
+            << "| Reads | " << config_.reads << " |\n"
+            << "| Key size (bytes) | " << config_.key_size << " |\n"
+            << "| Value size (bytes) | " << config_.value_size << " |\n"
+            << "| Threads | 1 |\n"
+            << "| Mode | " << MeasurementModeName(config_.measurement_mode) << " |\n";
     if (config_.measurement_mode == MeasurementMode::kLatency) {
-      output_ << ", latency sample: every " << config_.latency_sample << " operation";
+      output_ << "| Latency sampling | every " << config_.latency_sample << " operation |\n";
     }
-    output_ << '\n';
+    output_ << "\n## Results\n\n";
 
     for (const std::string& benchmark : SplitBenchmarks(config_.benchmarks)) {
       if (benchmark == "fillseq") {
