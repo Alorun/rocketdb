@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "dbformat.h"
@@ -12,6 +13,7 @@ class DBImpl;
 // Return a new iterator that converts internal keys.
 // The keys are live at seqecified "sequence" number into appropriate user keys.
 Iterator* NewDBIterator(DBImpl* db, const Comparator* user_key_comparator, Iterator* internal_iter,
-                        SequenceNumber sequence, uint32_t seed);
+                        SequenceNumber sequence, uint32_t seed,
+                        size_t max_sequential_skip_in_iterations = 0);
 
 }

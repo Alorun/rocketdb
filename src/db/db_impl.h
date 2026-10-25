@@ -22,6 +22,8 @@
 
 namespace rocketdb {
 
+struct FlushPruningOptions;
+
 class DBImpl : public DB {
     public:
         DBImpl(const Options& options, const std::string& dbname);
@@ -106,7 +108,9 @@ class DBImpl : public DB {
                               VersionEdit* edit, SequenceNumber* max_sequence) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base,
-                                FlushResult* result) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+                                FlushResult* result,
+                                const FlushPruningOptions* pruning = nullptr)
+            EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         // Check whehter the current memtable state allows writes
         Status MakeRoomForWrite(bool force) EXCLUSIVE_LOCKS_REQUIRED(mutex_);

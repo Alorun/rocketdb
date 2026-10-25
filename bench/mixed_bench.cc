@@ -21,13 +21,9 @@
 #include <utility>
 #include <vector>
 
-#include "cache.h"
-#include "db.h"
 #include "db/dbformat.h"
-#include "env.h"
-#include "filter_policy.h"
-#include "options.h"
-#include "status.h"
+
+#include "backend.h"
 
 namespace {
 
@@ -41,7 +37,7 @@ enum class MeasurementMode { kThroughput, kLatency };
   throw std::runtime_error(message);
 }
 
-void CheckOk(const rocketdb::Status &status, const std::string &context) {
+void CheckOk(const benchdb::Status &status, const std::string &context) {
   if (!status.ok())
     Fail(context + ": " + status.ToString());
 }
@@ -113,6 +109,7 @@ std::vector<int> ParseIntList(const std::string &text, const char *name) {
 }
 
 struct Config {
+  std::string output = ROCKETDB_MIXED_BENCH_RESULT_PATH;
   std::vector<int> thread_counts{1, 2, 4, 8};
   std::vector<int> read_ratios{50, 95};
   uint64_t num = 1000000;
@@ -126,7 +123,7 @@ struct Config {
   size_t max_file_size = 2 << 20;
   size_t block_cache_size = 8 << 20;
   int bloom_bits = -1;
-  rocketdb::CompressionType compression = rocketdb::kNoCompression;
+  benchdb::CompressionType compression = benchdb::kNoCompression;
   MeasurementMode measurement_mode = MeasurementMode::kThroughput;
   bool sync = false;
   bool keep_db = false;
@@ -136,16 +133,16 @@ struct Config {
 // RandomAccessFile::Read returns a Slice into the mapped file instead of the
 // caller's scratch buffer. This benchmark needs the data-block cache to be the
 // measured read path, so normalize such reads into the supplied scratch buffer.
-class CacheableRandomAccessFile : public rocketdb::RandomAccessFile {
+class CacheableRandomAccessFile : public benchdb::RandomAccessFile {
 public:
   explicit CacheableRandomAccessFile(
-      std::unique_ptr<rocketdb::RandomAccessFile> target)
+      std::unique_ptr<benchdb::RandomAccessFile> target)
       : target_(std::move(target)) {}
 
-  rocketdb::Status Read(uint64_t offset, size_t n, rocketdb::Slice *result,
+  benchdb::Status Read(uint64_t offset, size_t n, benchdb::Slice *result,
                         char *scratch) const override {
-    rocketdb::Slice target_result;
-    const rocketdb::Status status =
+    benchdb::Slice target_result;
+    const benchdb::Status status =
         target_->Read(offset, n, &target_result, scratch);
     if (!status.ok()) {
       *result = target_result;
@@ -153,7 +150,7 @@ public:
     }
     if (target_result.data() != scratch) {
       std::memmove(scratch, target_result.data(), target_result.size());
-      *result = rocketdb::Slice(scratch, target_result.size());
+      *result = benchdb::Slice(scratch, target_result.size());
     } else {
       *result = target_result;
     }
@@ -161,24 +158,24 @@ public:
   }
 
 private:
-  std::unique_ptr<rocketdb::RandomAccessFile> target_;
+  std::unique_ptr<benchdb::RandomAccessFile> target_;
 };
 
-class BlockCacheReadEnv : public rocketdb::EnvWrapper {
+class BlockCacheReadEnv : public benchdb::EnvWrapper {
 public:
-  explicit BlockCacheReadEnv(rocketdb::Env *target)
-      : rocketdb::EnvWrapper(target) {}
+  explicit BlockCacheReadEnv(benchdb::Env *target)
+      : benchdb::EnvWrapper(target) {}
 
-  rocketdb::Status
+  benchdb::Status
   NewRandomAccessFile(const std::string &filename,
-                      rocketdb::RandomAccessFile **result) override {
+                      benchdb::RandomAccessFile **result) override {
     *result = nullptr;
-    rocketdb::RandomAccessFile *raw_file = nullptr;
-    rocketdb::Status status =
+    benchdb::RandomAccessFile *raw_file = nullptr;
+    benchdb::Status status =
         target()->NewRandomAccessFile(filename, &raw_file);
     if (!status.ok())
       return status;
-    std::unique_ptr<rocketdb::RandomAccessFile> target_file(raw_file);
+    std::unique_ptr<benchdb::RandomAccessFile> target_file(raw_file);
     *result = new CacheableRandomAccessFile(std::move(target_file));
     return status;
   }
@@ -190,6 +187,7 @@ void PrintUsage(const char *program) {
       << "Runs an isolated temporary DB for every read-ratio/thread-count "
          "scenario.\n\n"
       << "Options:\n"
+      << "  --output=PATH              Markdown result path\n"
       << "  --threads=LIST             Thread counts (default: 1,2,4,8)\n"
       << "  --read_ratios=LIST         Read percentages; writes use the "
          "remainder (default: 50,95)\n"
@@ -230,6 +228,8 @@ Config ParseArgs(int argc, char **argv) {
       config.sync = true;
     } else if (argument == "--keep_db") {
       config.keep_db = true;
+    } else if (ReadOptionValue(argument, "--output", &value)) {
+      config.output = value;
     } else if (ReadOptionValue(argument, "--threads", &value)) {
       config.thread_counts = ParseIntList(value, "--threads");
     } else if (ReadOptionValue(argument, "--read_ratios", &value)) {
@@ -259,11 +259,11 @@ Config ParseArgs(int argc, char **argv) {
       config.bloom_bits = ParseInt(value, "--bloom_bits");
     } else if (ReadOptionValue(argument, "--compression", &value)) {
       if (value == "none") {
-        config.compression = rocketdb::kNoCompression;
+        config.compression = benchdb::kNoCompression;
       } else if (value == "snappy") {
-        config.compression = rocketdb::kSnappyCompression;
+        config.compression = benchdb::kSnappyCompression;
       } else if (value == "zstd") {
-        config.compression = rocketdb::kZstdCompression;
+        config.compression = benchdb::kZstdCompression;
       } else {
         Fail("invalid --compression: " + value);
       }
@@ -305,17 +305,17 @@ Config ParseArgs(int argc, char **argv) {
   return config;
 }
 
-void WriteResultFile(const std::string &result) {
-  std::ofstream output(ROCKETDB_MIXED_BENCH_RESULT_PATH,
+void WriteResultFile(const std::string &result, const std::string& path) {
+  std::ofstream output(path,
                        std::ios::out | std::ios::trunc);
   if (!output) {
     Fail(std::string("cannot open benchmark result file: ") +
-         ROCKETDB_MIXED_BENCH_RESULT_PATH);
+         path);
   }
   output << result;
   if (!output) {
     Fail(std::string("cannot write benchmark result file: ") +
-         ROCKETDB_MIXED_BENCH_RESULT_PATH);
+         path);
   }
 }
 
@@ -344,13 +344,23 @@ NumericProperty ParseNumericProperty(const std::string &text,
   return result;
 }
 
-NumericProperty ReadNumericProperty(rocketdb::DB *db,
+NumericProperty ReadNumericProperty(benchdb::DB *db,
                                     const char *property_name) {
   std::string text;
   if (!db->GetProperty(property_name, &text)) {
+#ifdef ROCKETDB_BENCH_USE_LEVELDB
+    return {};  // These cumulative perf counters are not available in LevelDB.
+#else
     Fail(std::string("property is not supported: ") + property_name);
+#endif
   }
   return ParseNumericProperty(text, property_name);
+}
+
+NumericProperty ReadCacheProperty(benchdb::Cache* cache) {
+  const auto stats = bench_backend::ReadCacheStats(cache);
+  return {{"version", 1}, {"supported", 1},
+          {"block_cache_hit", stats.hit}, {"block_cache_miss", stats.miss}};
 }
 
 uint64_t PropertyValue(const NumericProperty &property,
@@ -370,12 +380,12 @@ uint64_t PropertyDelta(const NumericProperty &begin, const NumericProperty &end,
   return end_value - begin_value;
 }
 
-uint64_t ReadL0Files(rocketdb::DB *db) {
+uint64_t ReadL0Files(benchdb::DB *db) {
   std::string value;
-  if (!db->GetProperty("rocketdb.num-files-at-level0", &value)) {
-    Fail("rocketdb.num-files-at-level0 is not supported");
+  if (!db->GetProperty(BENCH_PROPERTY_PREFIX "num-files-at-level0", &value)) {
+    Fail(BENCH_PROPERTY_PREFIX "num-files-at-level0 is not supported");
   }
-  return ParseUint64(value, "rocketdb.num-files-at-level0");
+  return ParseUint64(value, BENCH_PROPERTY_PREFIX "num-files-at-level0");
 }
 
 class StartGate {
@@ -474,20 +484,20 @@ struct ScenarioResult {
 
 class ScopedDatabase {
 public:
-  ScopedDatabase(std::string path, rocketdb::Options options, bool keep)
+  ScopedDatabase(std::string path, benchdb::Options options, bool keep)
       : path_(std::move(path)), options_(options), keep_(keep) {}
 
   ~ScopedDatabase() {
     if (keep_)
       return;
-    (void)rocketdb::DestroyDB(path_, options_);
+    (void)benchdb::DestroyDB(path_, options_);
     std::error_code error;
     fs::remove_all(path_, error);
   }
 
 private:
   std::string path_;
-  rocketdb::Options options_;
+  benchdb::Options options_;
   bool keep_;
 };
 
@@ -496,9 +506,9 @@ public:
   explicit BenchmarkRunner(Config config)
       : config_(std::move(config)),
         block_cache_read_env_(
-            std::make_unique<BlockCacheReadEnv>(rocketdb::Env::Default())) {
+            std::make_unique<BlockCacheReadEnv>(benchdb::Env::Default())) {
     if (config_.bloom_bits > 0) {
-      filter_policy_.reset(rocketdb::NewBloomFilterPolicy(config_.bloom_bits));
+      filter_policy_.reset(benchdb::NewBloomFilterPolicy(config_.bloom_bits));
     }
     (void)KeyFor(config_.num - 1);
   }
@@ -518,16 +528,16 @@ public:
     }
 
     const std::string report = output_.str();
-    WriteResultFile(report);
+    WriteResultFile(report, config_.output);
     std::cout << report
-              << "Results written to: " << ROCKETDB_MIXED_BENCH_RESULT_PATH
+              << "Results written to: " << config_.output
               << '\n';
   }
 
 private:
-  rocketdb::Options MakeOptions(bool create_if_missing,
-                                rocketdb::Cache *cache) const {
-    rocketdb::Options options;
+  benchdb::Options MakeOptions(bool create_if_missing,
+                                benchdb::Cache *cache) const {
+    benchdb::Options options;
     options.create_if_missing = create_if_missing;
     options.write_buffer_size = config_.write_buffer_size;
     options.max_file_size = config_.max_file_size;
@@ -543,11 +553,11 @@ private:
     const fs::path temp_directory = fs::temp_directory_path(error);
     if (error)
       Fail("cannot find a temporary directory: " + error.message());
-    const uint64_t timestamp = rocketdb::Env::Default()->NowMicros();
+    const uint64_t timestamp = benchdb::Env::Default()->NowMicros();
     for (uint64_t suffix = 0; suffix != 1000; ++suffix) {
       const fs::path candidate =
           temp_directory /
-          ("rocketdb-mixed-bench-" + std::to_string(timestamp) + "-" +
+          (BENCH_ENGINE_SLUG "-mixed-bench-" + std::to_string(timestamp) + "-" +
            std::to_string(scenario_index) + "-" + std::to_string(suffix));
       if (!fs::exists(candidate, error) && !error)
         return candidate.string();
@@ -557,11 +567,11 @@ private:
     Fail("could not allocate a unique temporary database path");
   }
 
-  std::unique_ptr<rocketdb::DB> OpenDatabase(const rocketdb::Options &options,
+  std::unique_ptr<benchdb::DB> OpenDatabase(const benchdb::Options &options,
                                              const std::string &path) const {
-    rocketdb::DB *database = nullptr;
-    CheckOk(rocketdb::DB::Open(options, path, &database), "open database");
-    return std::unique_ptr<rocketdb::DB>(database);
+    benchdb::DB *database = nullptr;
+    CheckOk(benchdb::DB::Open(options, path, &database), "open database");
+    return std::unique_ptr<benchdb::DB>(database);
   }
 
   std::string KeyFor(uint64_t index) const {
@@ -580,9 +590,9 @@ private:
   }
 
   void Prefill(const std::string &path) const {
-    const rocketdb::Options options = MakeOptions(true, nullptr);
-    std::unique_ptr<rocketdb::DB> database = OpenDatabase(options, path);
-    const rocketdb::WriteOptions write_options;
+    const benchdb::Options options = MakeOptions(true, nullptr);
+    std::unique_ptr<benchdb::DB> database = OpenDatabase(options, path);
+    const benchdb::WriteOptions write_options;
     const std::string value = Value();
     for (uint64_t index = 0; index < config_.num; ++index) {
       CheckOk(database->Put(write_options, KeyFor(index), value),
@@ -591,19 +601,19 @@ private:
     database->CompactRange(nullptr, nullptr);
   }
 
-  void VerifyBlockCache(rocketdb::DB *database,
-                        rocketdb::Cache *block_cache) const {
+  void VerifyBlockCache(benchdb::DB *database,
+                        benchdb::Cache *block_cache) const {
     block_cache->Prune();
     const NumericProperty before =
-        ReadNumericProperty(database, "rocketdb.block-cache-stats");
-    const rocketdb::ReadOptions read_options;
+        ReadCacheProperty(block_cache);
+    const benchdb::ReadOptions read_options;
     std::string value;
     CheckOk(database->Get(read_options, KeyFor(0), &value),
             "block cache verification first read");
     if (value.size() != config_.value_size)
       Fail("block cache verification returned an unexpected value size");
     const NumericProperty after_miss =
-        ReadNumericProperty(database, "rocketdb.block-cache-stats");
+        ReadCacheProperty(block_cache);
     if (PropertyValue(after_miss, "block_cache_miss") <=
         PropertyValue(before, "block_cache_miss")) {
       Fail("block cache verification did not observe the first-read miss");
@@ -613,7 +623,7 @@ private:
     CheckOk(database->Get(read_options, KeyFor(0), &value),
             "block cache verification second read");
     const NumericProperty after_hit =
-        ReadNumericProperty(database, "rocketdb.block-cache-stats");
+        ReadCacheProperty(block_cache);
     if (PropertyValue(after_hit, "block_cache_hit") <=
         PropertyValue(after_miss, "block_cache_hit")) {
       Fail("block cache verification did not observe the second-read hit");
@@ -624,7 +634,7 @@ private:
     block_cache->Prune();
   }
 
-  void Worker(rocketdb::DB *database, int thread_index, int read_ratio,
+  void Worker(benchdb::DB *database, int thread_index, int read_ratio,
               StartGate *gate, std::atomic<bool> *stop,
               std::condition_variable *stop_condition,
               ThreadStats *stats) const {
@@ -633,8 +643,8 @@ private:
     std::uniform_int_distribution<uint64_t> key_distribution(0,
                                                              config_.num - 1);
     std::uniform_int_distribution<int> operation_distribution(0, 99);
-    const rocketdb::ReadOptions read_options;
-    rocketdb::WriteOptions write_options;
+    const benchdb::ReadOptions read_options;
+    benchdb::WriteOptions write_options;
     write_options.sync = config_.sync;
     const std::string write_value = Value();
     std::string read_value;
@@ -651,7 +661,7 @@ private:
       if (record_latency)
         operation_start = BenchmarkClock::now();
 
-      rocketdb::Status status;
+      benchdb::Status status;
       if (is_read) {
         read_value.clear();
         status = database->Get(read_options, key, &read_value);
@@ -659,7 +669,7 @@ private:
           stats->read_latency_ns.push_back(ElapsedNanos(operation_start));
         }
         if (status.ok() && read_value.size() != config_.value_size) {
-          status = rocketdb::Status::Corruption(
+          status = benchdb::Status::Corruption(
               "mixed read returned an unexpected value size");
         }
         if (status.ok())
@@ -692,23 +702,23 @@ private:
     result.read_ratio = read_ratio;
     result.database_path = NewTemporaryDatabasePath(scenario_index);
 
-    const rocketdb::Options cleanup_options = MakeOptions(false, nullptr);
+    const benchdb::Options cleanup_options = MakeOptions(false, nullptr);
     ScopedDatabase cleanup(result.database_path, cleanup_options,
                            config_.keep_db);
     Prefill(result.database_path);
 
-    std::unique_ptr<rocketdb::Cache> block_cache(
-        rocketdb::NewLRUCacheWithStatistics(config_.block_cache_size));
-    const rocketdb::Options measured_options =
+    std::unique_ptr<benchdb::Cache> block_cache(
+        bench_backend::NewStatisticsCache(config_.block_cache_size));
+    const benchdb::Options measured_options =
         MakeOptions(false, block_cache.get());
-    std::unique_ptr<rocketdb::DB> database =
+    std::unique_ptr<benchdb::DB> database =
         OpenDatabase(measured_options, result.database_path);
 
     VerifyBlockCache(database.get(), block_cache.get());
     result.perf_begin =
-        ReadNumericProperty(database.get(), "rocketdb.perf-stats");
+        ReadNumericProperty(database.get(), BENCH_PROPERTY_PREFIX "perf-stats");
     result.cache_begin =
-        ReadNumericProperty(database.get(), "rocketdb.block-cache-stats");
+        ReadCacheProperty(block_cache.get());
     if (PropertyValue(result.cache_begin, "supported") != 1) {
       Fail("statistics-enabled block cache did not expose counters");
     }
@@ -788,9 +798,9 @@ private:
     result.sampled_peak_l0_files =
         std::max(sampled_peak_l0_files, result.current_l0_files);
     result.perf_end =
-        ReadNumericProperty(database.get(), "rocketdb.perf-stats");
+        ReadNumericProperty(database.get(), BENCH_PROPERTY_PREFIX "perf-stats");
     result.cache_end =
-        ReadNumericProperty(database.get(), "rocketdb.block-cache-stats");
+        ReadCacheProperty(block_cache.get());
     return result;
   }
 
@@ -802,7 +812,7 @@ private:
     const long double dataset_bytes = static_cast<long double>(config_.num) *
                                       (config_.key_size + config_.value_size);
     output_
-        << "# RocketDB Mixed Read/Write Benchmark\n\n"
+        << "# " BENCH_ENGINE_NAME " Mixed Read/Write Benchmark\n\n"
         << "## Configuration\n\n"
         << "| Setting | Value |\n"
         << "|---|---:|\n"
@@ -878,12 +888,34 @@ private:
       WriteLatencyRow("Write", result.write_latency);
     }
 
+    if (result.perf_end.empty()) {
+      const uint64_t hits = PropertyDelta(result.cache_begin, result.cache_end, "block_cache_hit");
+      const uint64_t misses = PropertyDelta(result.cache_begin, result.cache_end, "block_cache_miss");
+      output_ << "\n### LSM and cache\n\n| Metric | Value |\n|---|---:|\n"
+              << "| Current L0 files | " << result.current_l0_files << " |\n"
+              << "| Sampled peak L0 files | " << result.sampled_peak_l0_files << " |\n"
+              << "| Block cache hits | " << hits << " |\n"
+              << "| Block cache misses | " << misses << " |\n";
+      if (hits + misses != 0) {
+        output_ << "| Block cache hit rate | " << std::fixed << std::setprecision(2)
+                << 100.0 * hits / (hits + misses) << "% |\n";
+      } else {
+        output_ << "| Block cache hit rate | n/a |\n";
+      }
+      output_ << "\nFlush/major-compaction counters, stall counters, and SST write "
+                 "amplification are unavailable in this LevelDB API.\n"
+                 "Block Cache counts include foreground and background data-block "
+                 "lookups; TableCache is excluded.\n\n";
+      if (config_.keep_db) output_ << "Database kept at: `" << result.database_path << "`\n\n";
+      return;
+    }
+
     uint64_t major_count = 0;
     uint64_t major_total_micros = 0;
     uint64_t major_bytes_read = 0;
     uint64_t major_bytes_written = 0;
     uint64_t trivial_moves = 0;
-    for (int level = 0; level < rocketdb::config::kNumLevels; ++level) {
+    for (int level = 0; level < benchdb::config::kNumLevels; ++level) {
       const std::string suffix = "." + std::to_string(level);
       major_count += PropertyDelta(result.perf_begin, result.perf_end,
                                    "major_compaction_count" + suffix);
@@ -959,7 +991,7 @@ private:
     WriteStallRow(result, "L0 stop", "l0_stop");
 
     bool wrote_level_header = false;
-    for (int level = 0; level < rocketdb::config::kNumLevels; ++level) {
+    for (int level = 0; level < benchdb::config::kNumLevels; ++level) {
       const std::string suffix = "." + std::to_string(level);
       const uint64_t level_flushes =
           PropertyDelta(result.perf_begin, result.perf_end,
@@ -1010,7 +1042,7 @@ private:
 
   Config config_;
   std::unique_ptr<BlockCacheReadEnv> block_cache_read_env_;
-  std::unique_ptr<const rocketdb::FilterPolicy> filter_policy_;
+  std::unique_ptr<const benchdb::FilterPolicy> filter_policy_;
   std::ostringstream output_;
 };
 

@@ -5,6 +5,7 @@ project(MiniRocketDB)
 # for normal consumers, including cgo callers.
 option(ROCKETDB_ENABLE_ASAN "Build RocketDB with AddressSanitizer (debug only)" OFF)
 option(ROCKETDB_BUILD_BENCHMARKS "Build RocketDB benchmark tools" OFF)
+set(ROCKETDB_LEVELDB_SOURCE_DIR "" CACHE PATH "Optional LevelDB source tree for shared-driver comparisons")
 
 # Keep the production library separate from command-line tools.  In
 # particular, src/db/levelbuild.cc defines its own main() and must not become
@@ -95,6 +96,49 @@ if(ROCKETDB_BUILD_BENCHMARKS)
     if(ROCKETDB_ENABLE_ASAN)
         target_compile_options(rocketdb_bench PRIVATE -fsanitize=address -g)
         target_compile_options(rocketdb_mixed_bench PRIVATE -fsanitize=address -g)
+    endif()
+
+    if(ROCKETDB_LEVELDB_SOURCE_DIR)
+        if(ROCKETDB_ENABLE_ASAN)
+            message(FATAL_ERROR "Use a non-ASan build for engine performance comparisons")
+        endif()
+        set(LEVELDB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(LEVELDB_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+        set(LEVELDB_INSTALL OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${ROCKETDB_LEVELDB_SOURCE_DIR}"
+                         "${CMAKE_BINARY_DIR}/comparison-leveldb" EXCLUDE_FROM_ALL)
+
+        # Both engines run the same workload, key generation, timers, latency
+        # sampling, and histogram implementation in separate executables.
+        add_executable(leveldb_bench bench/db_bench.cc src/util/histogram.cc)
+        target_link_libraries(leveldb_bench PRIVATE leveldb)
+        target_compile_features(leveldb_bench PRIVATE cxx_std_17)
+        target_compile_definitions(leveldb_bench PRIVATE
+            ROCKETDB_BENCH_USE_LEVELDB=1
+            ROCKETDB_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/leveldb_basic_benchmark_results.md"
+        )
+
+        add_executable(leveldb_mixed_bench bench/mixed_bench.cc)
+        target_link_libraries(leveldb_mixed_bench PRIVATE leveldb)
+        target_compile_features(leveldb_mixed_bench PRIVATE cxx_std_17)
+        target_include_directories(leveldb_mixed_bench PRIVATE
+            "${ROCKETDB_LEVELDB_SOURCE_DIR}"
+            "${CMAKE_BINARY_DIR}/comparison-leveldb/include"
+        )
+        target_compile_definitions(leveldb_mixed_bench PRIVATE
+            ROCKETDB_BENCH_USE_LEVELDB=1
+            ROCKETDB_MIXED_BENCH_RESULT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/bench/leveldb_mixed_benchmark_results.md"
+        )
+        # LevelDB's CMake build disables RTTI; its benchmark-side subclasses
+        # must use the same convention. Exceptions remain enabled in drivers.
+        if(MSVC)
+            target_compile_options(leveldb_bench PRIVATE /GR-)
+            target_compile_options(leveldb_mixed_bench PRIVATE /GR-)
+        else()
+            target_compile_options(rocketdb PRIVATE -fno-exceptions)
+            target_compile_options(leveldb_bench PRIVATE -fno-rtti)
+            target_compile_options(leveldb_mixed_bench PRIVATE -fno-rtti)
+        endif()
     endif()
 endif()
 

@@ -509,6 +509,11 @@ void rocketdb_readoptions_set_snapshot(rocketdb_readoptions_t* opt,
   opt->rep.snapshot = (snap ? snap->rep : nullptr);
 }
 
+void rocketdb_readoptions_set_max_sequential_skip_in_iterations(
+    rocketdb_readoptions_t* opt, size_t threshold) {
+  opt->rep.max_sequential_skip_in_iterations = threshold;
+}
+
 rocketdb_writeoptions_t* rocketdb_writeoptions_create() {
   return new rocketdb_writeoptions_t;
 }

@@ -16,12 +16,9 @@
 #include <utility>
 #include <vector>
 
-#include "db.h"
-#include "env.h"
-#include "filter_policy.h"
-#include "options.h"
-#include "status.h"
-#include "util/histogram.h"
+#include "../src/util/histogram.h"
+
+#include "backend.h"
 
 namespace {
 
@@ -41,18 +38,19 @@ const char* MeasurementModeName(MeasurementMode mode) {
 
 [[noreturn]] void Fail(const std::string& message);
 
-void WriteResultFile(const std::string& result) {
-  std::ofstream output(ROCKETDB_BENCH_RESULT_PATH, std::ios::out | std::ios::trunc);
+void WriteResultFile(const std::string& result, const std::string& path) {
+  std::ofstream output(path, std::ios::out | std::ios::trunc);
   if (!output) {
-    Fail(std::string("cannot open benchmark result file: ") + ROCKETDB_BENCH_RESULT_PATH);
+    Fail("cannot open benchmark result file: " + path);
   }
   output << result;
   if (!output) {
-    Fail(std::string("cannot write benchmark result file: ") + ROCKETDB_BENCH_RESULT_PATH);
+    Fail("cannot write benchmark result file: " + path);
   }
 }
 
 struct Config {
+  std::string output = ROCKETDB_BENCH_RESULT_PATH;
   std::string benchmarks = "fillseq,fillrandom,readseq,readrandom";
   std::string db;
   uint64_t num = 1000000;
@@ -65,7 +63,7 @@ struct Config {
   int bloom_bits = -1;
   int threads = 1;
   uint64_t latency_sample = 1;
-  rocketdb::CompressionType compression = rocketdb::kNoCompression;
+  benchdb::CompressionType compression = benchdb::kNoCompression;
   MeasurementMode measurement_mode = MeasurementMode::kLatency;
   bool sync = false;
   bool use_existing_db = false;
@@ -76,7 +74,7 @@ struct Config {
   throw std::runtime_error(message);
 }
 
-void CheckOk(const rocketdb::Status& status, const std::string& context) {
+void CheckOk(const benchdb::Status& status, const std::string& context) {
   if (!status.ok()) {
     Fail(context + ": " + status.ToString());
   }
@@ -142,6 +140,7 @@ void PrintUsage(const char* program) {
       << "Basic workloads:\n"
       << "  fillseq, fillrandom, readseq, readrandom\n\n"
       << "Options:\n"
+      << "  --output=PATH           Markdown result path\n"
       << "  --benchmarks=LIST       Comma-separated workloads (default: fillseq,fillrandom,readseq,readrandom)\n"
       << "  --num=N                 Records to write or prefill (default: 1000000)\n"
       << "  --reads=N               Reads per read workload (default: 1000000)\n"
@@ -175,6 +174,8 @@ Config ParseArgs(int argc, char** argv) {
       config.use_existing_db = true;
     } else if (argument == "--keep_db") {
       config.keep_db = true;
+    } else if (ReadOptionValue(argument, "--output", &value)) {
+      config.output = value;
     } else if (ReadOptionValue(argument, "--benchmarks", &value)) {
       config.benchmarks = value;
     } else if (ReadOptionValue(argument, "--db", &value)) {
@@ -201,11 +202,11 @@ Config ParseArgs(int argc, char** argv) {
       config.threads = ParseInt(value, "--threads");
     } else if (ReadOptionValue(argument, "--compression", &value)) {
       if (value == "none") {
-        config.compression = rocketdb::kNoCompression;
+        config.compression = benchdb::kNoCompression;
       } else if (value == "snappy") {
-        config.compression = rocketdb::kSnappyCompression;
+        config.compression = benchdb::kSnappyCompression;
       } else if (value == "zstd") {
-        config.compression = rocketdb::kZstdCompression;
+        config.compression = benchdb::kZstdCompression;
       } else {
         Fail("invalid --compression: " + value);
       }
@@ -326,7 +327,7 @@ class BenchmarkRunner {
  public:
   explicit BenchmarkRunner(Config config) : config_(std::move(config)) {
     if (config_.bloom_bits > 0) {
-      filter_policy_.reset(rocketdb::NewBloomFilterPolicy(config_.bloom_bits));
+      filter_policy_.reset(benchdb::NewBloomFilterPolicy(config_.bloom_bits));
     }
 
     if (config_.db.empty()) {
@@ -343,7 +344,7 @@ class BenchmarkRunner {
   ~BenchmarkRunner() { Cleanup(); }
 
   void Run() {
-    output_ << "# RocketDB Basic Benchmark\n\n"
+    output_ << "# " BENCH_ENGINE_NAME " Basic Benchmark\n\n"
             << "## Configuration\n\n"
             << "| Setting | Value |\n"
             << "|---|---:|\n"
@@ -375,13 +376,13 @@ class BenchmarkRunner {
     }
 
     const std::string result = output_.str();
-    WriteResultFile(result);
-    std::cout << result << "Results written to: " << ROCKETDB_BENCH_RESULT_PATH << '\n';
+    WriteResultFile(result, config_.output);
+    std::cout << result << "Results written to: " << config_.output << '\n';
   }
 
  private:
-  rocketdb::Options MakeOptions() const {
-    rocketdb::Options options;
+  benchdb::Options MakeOptions() const {
+    benchdb::Options options;
     options.create_if_missing = !config_.use_existing_db;
     options.write_buffer_size = config_.write_buffer_size;
     options.max_file_size = config_.max_file_size;
@@ -395,10 +396,10 @@ class BenchmarkRunner {
     const fs::path temp_directory = fs::temp_directory_path(error);
     if (error) Fail("cannot find a temporary directory: " + error.message());
 
-    const uint64_t timestamp = rocketdb::Env::Default()->NowMicros();
+    const uint64_t timestamp = benchdb::Env::Default()->NowMicros();
     for (uint64_t suffix = 0; suffix != 1000; ++suffix) {
       const fs::path candidate = temp_directory /
-                                 ("rocketdb-bench-" + std::to_string(timestamp) + "-" +
+                                 (BENCH_ENGINE_SLUG "-bench-" + std::to_string(timestamp) + "-" +
                                   std::to_string(suffix));
       if (!fs::exists(candidate, error) && !error) return candidate.string();
       if (error) Fail("cannot inspect temporary database path: " + error.message());
@@ -406,16 +407,16 @@ class BenchmarkRunner {
     Fail("could not allocate a unique temporary database path");
   }
 
-  std::unique_ptr<rocketdb::DB> OpenDatabase() const {
-    rocketdb::DB* database = nullptr;
-    CheckOk(rocketdb::DB::Open(MakeOptions(), dbname_, &database), "open database");
-    return std::unique_ptr<rocketdb::DB>(database);
+  std::unique_ptr<benchdb::DB> OpenDatabase() const {
+    benchdb::DB* database = nullptr;
+    CheckOk(benchdb::DB::Open(MakeOptions(), dbname_, &database), "open database");
+    return std::unique_ptr<benchdb::DB>(database);
   }
 
   void ResetOwnedDatabase() {
     if (!owns_database_) return;
 
-    const rocketdb::Status status = rocketdb::DestroyDB(dbname_, MakeOptions());
+    const benchdb::Status status = benchdb::DestroyDB(dbname_, MakeOptions());
     CheckOk(status, "remove temporary database");
     std::error_code error;
     fs::remove_all(dbname_, error);
@@ -426,8 +427,8 @@ class BenchmarkRunner {
     if (config_.use_existing_db) return;
 
     ResetOwnedDatabase();
-    std::unique_ptr<rocketdb::DB> database = OpenDatabase();
-    const rocketdb::WriteOptions write_options;
+    std::unique_ptr<benchdb::DB> database = OpenDatabase();
+    const benchdb::WriteOptions write_options;
     const std::string value = Value();
     for (uint64_t index = 0; index < config_.num; ++index) {
       CheckOk(database->Put(write_options, KeyFor(index), value), "prefill record");
@@ -460,8 +461,8 @@ class BenchmarkRunner {
     // every fill workload starts with an empty database. With --use_existing_db
     // it intentionally does nothing, preserving the user-selected database.
     ResetOwnedDatabase();
-    std::unique_ptr<rocketdb::DB> database = OpenDatabase();
-    rocketdb::WriteOptions write_options;
+    std::unique_ptr<benchdb::DB> database = OpenDatabase();
+    benchdb::WriteOptions write_options;
     write_options.sync = config_.sync;
     const std::string value = Value();
     std::mt19937_64 random(config_.seed);
@@ -484,8 +485,8 @@ class BenchmarkRunner {
 
   void RunRead(const std::string& name, bool sequential) {
     PrepareReadDatabase();
-    std::unique_ptr<rocketdb::DB> database = OpenDatabase();
-    const rocketdb::ReadOptions read_options;
+    std::unique_ptr<benchdb::DB> database = OpenDatabase();
+    const benchdb::ReadOptions read_options;
     if (sequential) {
       RunSequentialRead(name, database.get(), read_options);
       return;
@@ -514,9 +515,9 @@ class BenchmarkRunner {
     stats.Report(name, ElapsedNanos(start), output_);
   }
 
-  void RunSequentialRead(const std::string& name, rocketdb::DB* database,
-                         const rocketdb::ReadOptions& read_options) {
-    std::unique_ptr<rocketdb::Iterator> iterator;
+  void RunSequentialRead(const std::string& name, benchdb::DB* database,
+                         const benchdb::ReadOptions& read_options) {
+    std::unique_ptr<benchdb::Iterator> iterator;
     const auto reset_iterator = [&]() {
       iterator.reset(database->NewIterator(read_options));
       iterator->SeekToFirst();
@@ -536,8 +537,8 @@ class BenchmarkRunner {
       const bool record_latency = stats.ShouldRecordLatency(index);
       BenchmarkClock::time_point operation_start;
       if (record_latency) operation_start = BenchmarkClock::now();
-      const rocketdb::Slice key = iterator->key();
-      const rocketdb::Slice value = iterator->value();
+      const benchdb::Slice key = iterator->key();
+      const benchdb::Slice value = iterator->value();
       if (value.size() != config_.value_size) {
         Fail(name + " returned an unexpected value size");
       }
@@ -552,7 +553,7 @@ class BenchmarkRunner {
   void Cleanup() noexcept {
     if (!owns_database_ || config_.keep_db || dbname_.empty()) return;
 
-    (void)rocketdb::DestroyDB(dbname_, MakeOptions());
+    (void)benchdb::DestroyDB(dbname_, MakeOptions());
     std::error_code error;
     fs::remove_all(dbname_, error);
   }
@@ -560,7 +561,7 @@ class BenchmarkRunner {
   Config config_;
   std::string dbname_;
   bool owns_database_ = false;
-  std::unique_ptr<const rocketdb::FilterPolicy> filter_policy_;
+  std::unique_ptr<const benchdb::FilterPolicy> filter_policy_;
   std::ostringstream output_;
 };
 

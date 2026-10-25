@@ -4,6 +4,12 @@ build-asan/
 build-dev/
 build-test/
 build-test-asan/
+build-comparison/
+bench/comparison-data/
+bench/comparison_results/
+bench/leveldb_basic_benchmark_results.md
+bench/leveldb_mixed_benchmark_results.md
+bench/__pycache__/
 bench/benchmark_results.txt
 bench/basic_benchmark_results.md
 bench/mixed_benchmark_results.md

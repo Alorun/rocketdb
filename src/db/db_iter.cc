@@ -36,11 +36,13 @@ class DBIter : public Iterator {
     public:
         enum Direction { kForward, kReverse };
 
-        DBIter(DBImpl* db, const Comparator* cmp, Iterator* iter, SequenceNumber s, uint32_t seed)
+        DBIter(DBImpl* db, const Comparator* cmp, Iterator* iter, SequenceNumber s,
+               uint32_t seed, size_t max_sequential_skip)
             : db_(db), 
                 user_comparator_(cmp), 
                 iter_(iter), 
                 sequence_(s),
+                max_sequential_skip_(max_sequential_skip),
                 direction_(kForward),
                 valid_(false),
                 rnd_(seed),
@@ -76,6 +78,8 @@ class DBIter : public Iterator {
     private:
         void FindNextUserEntry(bool skipping, std::string* skip);
         void FindPrevUserEntry();
+        void SeekBeforeUserKey(const std::string& user_key);
+        bool FindValueForCurrentKeyUsingSeek(const std::string& user_key);
         bool ParseKey(ParsedInternalKey* key);
 
         inline void SaveKey(const Slice& k, std::string* dst) {
@@ -101,6 +105,7 @@ class DBIter : public Iterator {
         const Comparator* const user_comparator_;
         Iterator* const iter_;
         SequenceNumber const sequence_;
+        const size_t max_sequential_skip_;
         Status status_;
         std::string saved_key_;
         std::string saved_value_;
@@ -168,9 +173,25 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
     // Loop until we hit an acceptable entry to yield
     assert(iter_->Valid());
     assert(direction_ == kForward);
+    std::string counted_key;
+    std::string seek_target;
+    size_t skipped = 0;
+    bool has_counted_key = false;
+    bool sought_snapshot = false;
+    bool sought_past_key = false;
     do {
         ParsedInternalKey ikey;
-        if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
+        const bool parsed = ParseKey(&ikey);
+        if (parsed && max_sequential_skip_ != 0 &&
+            (!has_counted_key ||
+             user_comparator_->Compare(ikey.user_key, counted_key) != 0)) {
+            SaveKey(ikey.user_key, &counted_key);
+            has_counted_key = true;
+            skipped = 0;
+            sought_snapshot = false;
+            sought_past_key = false;
+        }
+        if (parsed && ikey.sequence <= sequence_) {
             switch (ikey.type) {
                 case kTypeDeletion:
                     // Arrange to skip all upcoming entries for this key since they are hidden by this deletion.
@@ -188,6 +209,30 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
                     break;
             }
         }
+        if (parsed && max_sequential_skip_ != 0) {
+            // Saturate so even SIZE_MAX is a usable threshold.
+            if (skipped < max_sequential_skip_) ++skipped;
+            const bool skip_current_key =
+                skipping && user_comparator_->Compare(ikey.user_key, *skip) <= 0;
+            bool& sought = skip_current_key ? sought_past_key : sought_snapshot;
+            if (skipped >= max_sequential_skip_ && !sought) {
+                sought = true;
+                seek_target.clear();
+                AppendInternalKey(&seek_target, ParsedInternalKey(
+                    counted_key, skip_current_key ? 0 : sequence_,
+                    skip_current_key ? kTypeDeletion : kValueTypeForSeek));
+                // A sequence-zero boundary can be a real record. Never seek
+                // backward or repeatedly seek to the same internal key.
+                const InternalKeyComparator comparator(user_comparator_);
+                if (comparator.Compare(iter_->key(), seek_target) < 0) {
+                    skipped = 0;
+                    iter_->Seek(seek_target);
+                    continue;
+                }
+            }
+        } else if (!parsed) {
+            has_counted_key = false;
+        }
         iter_->Next();
     } while (iter_->Valid());
     saved_key_.clear();
@@ -202,6 +247,7 @@ void DBIter::Prev() {
         assert(iter_->Valid());
         // Save th current entry.
         SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
+        size_t skipped = 0;
         while (true) {
             iter_->Prev();
             if (!iter_->Valid()) {
@@ -213,11 +259,62 @@ void DBIter::Prev() {
             if (user_comparator_->Compare(ExtractUserKey(iter_->key()), saved_key_) < 0) {
                 break;
             }
+            if (max_sequential_skip_ != 0 && ++skipped >= max_sequential_skip_) {
+                SeekBeforeUserKey(saved_key_);
+                if (!iter_->Valid()) {
+                    valid_ = false;
+                    saved_key_.clear();
+                    ClearSaveValue();
+                    return;
+                }
+                break;
+            }
         }
         direction_ = kReverse;
     }
 
     FindPrevUserEntry();
+}
+
+void DBIter::SeekBeforeUserKey(const std::string& user_key) {
+    std::string target;
+    AppendInternalKey(&target,
+                      ParsedInternalKey(user_key, kMaxSequenceNumber, kValueTypeForSeek));
+    iter_->Seek(target);
+    if (iter_->Valid()) {
+        iter_->Prev();
+    } else if (iter_->status().ok()) {
+        iter_->SeekToLast();
+    }
+}
+
+bool DBIter::FindValueForCurrentKeyUsingSeek(const std::string& user_key) {
+    std::string target;
+    AppendInternalKey(&target, ParsedInternalKey(user_key, sequence_, kValueTypeForSeek));
+    iter_->Seek(target);
+    bool found = false;
+    ParsedInternalKey ikey;
+    if (iter_->Valid() && ParseKey(&ikey) && ikey.sequence <= sequence_ &&
+        user_comparator_->Compare(ikey.user_key, user_key) == 0 &&
+        ikey.type == kTypeValue) {
+        SaveKey(ikey.user_key, &saved_key_);
+        if (saved_value_.capacity() > iter_->value().size() + 1048576) {
+            std::string empty;
+            swap(empty, saved_value_);
+        }
+        saved_value_.assign(iter_->value().data(), iter_->value().size());
+        found = true;
+    }
+    // Preserve a seek/parse error before a second seek could replace its state.
+    if (!iter_->status().ok() && status_.ok()) status_ = iter_->status();
+    if (!status_.ok()) return false;
+    if (!found) {
+        saved_key_.clear();
+        ClearSaveValue();
+    }
+    // Reverse DBIter keeps the internal cursor before the returned user key.
+    SeekBeforeUserKey(user_key);
+    return found;
 }
 
 void DBIter::FindPrevUserEntry() {
@@ -226,10 +323,40 @@ void DBIter::FindPrevUserEntry() {
     // Reverse scan may firstly encounter a old value.
     // We need save the value util the new value is encountered
     ValueType value_type = kTypeDeletion;
+    std::string counted_key;
+    size_t skipped = 0;
+    bool has_counted_key = false;
     if (iter_->Valid()) {
         do {
             ParsedInternalKey ikey;
-            if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
+            const bool parsed = ParseKey(&ikey);
+            if (parsed && max_sequential_skip_ != 0) {
+                if (value_type != kTypeDeletion &&
+                    user_comparator_->Compare(ikey.user_key, saved_key_) < 0) {
+                    break;
+                }
+                if (!has_counted_key ||
+                    user_comparator_->Compare(ikey.user_key, counted_key) != 0) {
+                    SaveKey(ikey.user_key, &counted_key);
+                    has_counted_key = true;
+                    skipped = 0;
+                }
+                if (skipped < max_sequential_skip_) ++skipped;
+                if (skipped >= max_sequential_skip_) {
+                    value_type = FindValueForCurrentKeyUsingSeek(counted_key)
+                                     ? kTypeValue : kTypeDeletion;
+                    if (!status().ok()) {
+                        value_type = kTypeDeletion;
+                        break;
+                    }
+                    if (value_type == kTypeValue) break;
+                    has_counted_key = false;
+                    continue;
+                }
+            } else if (!parsed) {
+                has_counted_key = false;
+            }
+            if (parsed && ikey.sequence <= sequence_) {
                 if ((value_type != kTypeDeletion) && user_comparator_->Compare(ikey.user_key, saved_key_) < 0) {
                     // We encountered a non_deleted value in entries for previous keys.
                     break;
@@ -297,8 +424,10 @@ void DBIter::SeekToLast() {
 }
 
 Iterator* NewDBIterator(DBImpl* db, const Comparator* user_key_comparator, Iterator* internal_iter,
-                        SequenceNumber sequence, uint32_t seed) {
-    return new DBIter(db, user_key_comparator, internal_iter, sequence, seed);
+                        SequenceNumber sequence, uint32_t seed,
+                        size_t max_sequential_skip_in_iterations) {
+    return new DBIter(db, user_key_comparator, internal_iter, sequence, seed,
+                      max_sequential_skip_in_iterations);
 }
 
 }

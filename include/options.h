@@ -87,6 +87,11 @@ struct ReadOptions {
     // If "snapshot" is non-null, read as of the supplied snapshot
     // If "snapshot" is null, use an implicit snapshot of the state at the beginning of this read operation.
     const Snapshot* snapshot = nullptr;
+
+    // Iterator scans try a Seek after examining this many skipped internal
+    // records for one user key. Applies in both directions; 0 disables reseeks.
+    // Copied when an iterator is created. Ignored by point reads.
+    size_t max_sequential_skip_in_iterations = 0;
 };
 
 // Options that control write operations

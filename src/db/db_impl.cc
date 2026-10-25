@@ -491,7 +491,8 @@ Status DBImpl::RecoverLogFile(uint64_t log_nubmer, bool last_log, bool* save_man
 }
     
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base,
-                                FlushResult* result) {
+                                FlushResult* result,
+                                const FlushPruningOptions* pruning) {
     mutex_.AssertHeld();
     *result = FlushResult();
     FileMetaData meta;
@@ -503,7 +504,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base,
     Status s;
     {
         mutex_.Unlock();
-        s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
+        s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta, pruning);
         mutex_.Lock();
     }
 
@@ -536,8 +537,14 @@ void DBImpl::CompactMemTable() {
     VersionEdit edit;
     Version* base = versions_->current();
     base->Ref();
+    // Capture the bound while holding mutex_. New snapshots cannot need an
+    // older version, and existing readers keep their original memtable refs.
+    const FlushPruningOptions pruning = {
+        user_comparator(),
+        snapshots_.empty() ? versions_->LastSequence()
+                           : snapshots_.oldest()->sequence_number()};
     FlushResult result;
-    Status s = WriteLevel0Table(imm_, &edit, base, &result);
+    Status s = WriteLevel0Table(imm_, &edit, base, &result, &pruning);
     base->Unref();
 
     if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
@@ -1168,7 +1175,8 @@ Iterator* DBImpl::NewIterator(const ReadOptions& options) {
     return NewDBIterator(this, user_comparator(), iter,
                         (options.snapshot != nullptr 
                         ? static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number() 
-                        : latest_snapshot), seed);
+                        : latest_snapshot), seed,
+                        options.max_sequential_skip_in_iterations);
 }
 
 void DBImpl::RecordReadSample(Slice key) {

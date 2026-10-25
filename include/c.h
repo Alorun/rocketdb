@@ -224,6 +224,9 @@ ROCKETDB_EXPORT void rocketdb_readoptions_set_fill_cache(rocketdb_readoptions_t*
                                                        uint8_t);
 ROCKETDB_EXPORT void rocketdb_readoptions_set_snapshot(rocketdb_readoptions_t*,
                                                      const rocketdb_snapshot_t*);
+/* 0 disables iterator reseeks; positive values set the per-user-key threshold. */
+ROCKETDB_EXPORT void rocketdb_readoptions_set_max_sequential_skip_in_iterations(
+    rocketdb_readoptions_t*, size_t);
 
 /* Write options */
 
