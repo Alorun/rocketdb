@@ -171,35 +171,3 @@ each scenario it verifies a first-read Miss followed by a same-key Hit, prunes
 that warmed block, and then takes the starting counter snapshot. Each run
 overwrites `bench/mixed_benchmark_results.md`. Run
 `rocketdb_mixed_bench --help` for all options.
-
-### Comparing RocketDB and LevelDB
-
-`bench/compare_engines.py` builds both engines against the same basic and mixed
-benchmark sources. It uses C++17 Release builds with `-O2 -DNDEBUG`, disables
-RTTI and exceptions in both libraries, and disables optional external
-compression/CRC/allocator libraries. Benchmark drivers retain exception handling.
-The supplied LevelDB source tree is read without changing its files.
-
-```bash
-python3 bench/compare_engines.py \
-  --leveldb-source=/home/hahaha/work/leveldb \
-  --num=1000000 --reads=1000000 --repeats=3 --duration=10 \
-  --threads=1,2,4,8 --read-ratios=50,95
-```
-
-The runner alternates engine execution order, uses matching random seeds per
-pair, and runs each engine process serially. Throughput runs and the separate
-sampled-latency run are reported independently. Every scenario starts with a
-new database. Temporary data lives under `bench/comparison-data/` on the
-workspace filesystem, rather than the potentially memory-backed `/tmp`.
-Use `--cpu-affinity=LIST` to pin all benchmark processes to a chosen CPU set.
-
-Timestamped results under `bench/comparison_results/` include `summary.md`,
-`comparison.csv`, all raw reports and logs, execution commands, compiler
-commands, and source revisions/diffs. The mixed benchmark uses equivalent
-lookup-counting cache decorators for both engines. LevelDB does not expose
-RocketDB's cumulative flush, compaction, and stall counters, so those fields
-are explicitly unavailable for LevelDB. Both executables also support
-`--output=PATH` for standalone runs. Use `--resume --output=PATH` with the same
-parameters to continue an interrupted run, or `--summarize-only --output=PATH`
-to regenerate its summary without benchmarking.
